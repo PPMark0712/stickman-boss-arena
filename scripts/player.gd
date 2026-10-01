@@ -172,6 +172,11 @@ func step(delta: float, controls: Controls) -> void:
 
 func handle_movement(_delta: float, controls: Controls) -> void:
 	var axis := controls.axis
+	var preserves_air_movement := (
+		state == State.ATTACK
+		and attack_direction.y != 0
+		and (not is_on_floor() or velocity.y < 0)
+	)
 	if state == State.HEAL:
 		velocity.x = 0
 		if absf(axis) > 0.1 or controls.jump or controls.attack:
@@ -180,7 +185,10 @@ func handle_movement(_delta: float, controls: Controls) -> void:
 		else:
 			return
 	if state == State.ATTACK:
-		if hit_recoil_time <= 0:
+		if hit_recoil_time <= 0 and preserves_air_movement and axis != 0:
+			facing = signf(axis)
+			velocity.x = axis * ArenaConfig.RUN_SPEED
+		elif hit_recoil_time <= 0 and not preserves_air_movement:
 			velocity.x = 0
 	elif axis != 0:
 		if (
@@ -248,14 +256,13 @@ func begin_sword_attack(controls: Controls) -> void:
 	attack_variant = next_attack_variant
 	next_attack_variant = 1 - next_attack_variant
 	attack_direction = Vector2(facing, 0)
-	if not is_on_floor():
-		if controls.down:
-			attack_direction = Vector2.DOWN
-			velocity.y = maxf(velocity.y, 220.0)
-		elif controls.up:
-			attack_direction = Vector2.UP
-			velocity.y = minf(velocity.y * 0.55, -80.0)
-	velocity.x = 0
+	var airborne := not is_on_floor() or velocity.y < 0
+	if controls.up:
+		attack_direction = Vector2.UP
+	elif airborne and controls.down:
+		attack_direction = Vector2.DOWN
+	if not airborne or attack_direction.y == 0:
+		velocity.x = 0
 	hit_recoil_time = 0
 	hit_targets.clear()
 	attack_buffer = 0
@@ -351,9 +358,15 @@ func cast_spell() -> bool:
 
 func sword_rect() -> Rect2:
 	if attack_direction == Vector2.UP:
-		return Rect2(position + Vector2(-38, -153), Vector2(76, 99))
+		return Rect2(
+			position + Vector2(-ArenaConfig.VERTICAL_ATTACK_WIDTH * 0.5, -164),
+			Vector2(ArenaConfig.VERTICAL_ATTACK_WIDTH, ArenaConfig.UP_ATTACK_REACH),
+		)
 	if attack_direction == Vector2.DOWN:
-		return Rect2(position + Vector2(-39, -22), Vector2(78, 102))
+		return Rect2(
+			position + Vector2(-ArenaConfig.VERTICAL_ATTACK_WIDTH * 0.5, -20),
+			Vector2(ArenaConfig.VERTICAL_ATTACK_WIDTH, ArenaConfig.DOWN_ATTACK_REACH),
+		)
 	var x := 8.0 if facing > 0 else -ArenaConfig.ATTACK_REACH - 8.0
 	return Rect2(
 		position + Vector2(x, ArenaConfig.ATTACK_TOP),

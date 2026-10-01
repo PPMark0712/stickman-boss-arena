@@ -148,7 +148,7 @@ func controls_footer(parent: Node) -> void:
 	panel(parent, Rect2(48, 620, 1184, 1), Color("#2b3943"))
 	var items := [
 		["← →", "即时移动"], ["Z", "跳跃 / 二段跳"], ["X", "交替挥砍"],
-		["↑/↓ + X", "空中上劈 / 下劈"], ["C", "向前冲刺"],
+		["↑/↓ + X", "上劈 / 空中下劈"], ["C", "向前冲刺"],
 		["A", "短按法术 / 长按回血"],
 	]
 	var positions := [48, 204, 384, 546, 760, 913]
@@ -193,7 +193,7 @@ func start_fight(kind: int) -> void:
 	show_toast(
 		"练习模式 · 无限生命与能量"
 		if practice
-		else "X 交替挥砍 · 空中 ↑/↓ + X 劈斩 · 命中积攒能量",
+		else "X 交替挥砍 · ↑ + X 上劈 · 空中 ↓ + X 下劈",
 		3,
 	)
 
@@ -225,7 +225,7 @@ func build_hud() -> void:
 	top_buttons(hud)
 	label(
 		hud,
-		"← → 即时移动    Z 二段跳    X 交替挥砍    ↑/↓ + X 空中劈斩    C 冲刺    A 法术 / 长按回血",
+		"← → 即时移动    Z 二段跳    X 交替挥砍    ↑ + X 上劈    空中 ↓ + X 下劈    C 冲刺    A 法术 / 回血",
 		Vector2(141, 656),
 		15,
 		ArenaConfig.MUTED,

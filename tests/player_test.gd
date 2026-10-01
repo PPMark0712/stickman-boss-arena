@@ -102,6 +102,16 @@ func run() -> void:
 	check(player.velocity.x == -ArenaConfig.RUN_SPEED, "Horizontal reversal is immediate")
 	player.step(1.0 / 120, idle)
 	check(player.velocity.x == 0, "Horizontal release stops immediately")
+	player.step(1.0 / 120, controls({"up": true, "attack": true}))
+	check(
+		player.state == ArenaPlayer.State.ATTACK
+		and player.attack_direction == Vector2.UP
+		and player.is_on_floor(),
+		"Up plus X starts an upward slash from the ground",
+	)
+	player.change_state(ArenaPlayer.State.IDLE)
+	player.attack_buffer = 0
+	player.attack_queued = false
 	player.facing = 1
 	player.step(1.0 / 120, controls({"jump": true}))
 	check(player.velocity.y < -600 and player.jumps_used == 1, "Ground jump")
@@ -133,20 +143,34 @@ func run() -> void:
 	player.velocity = Vector2(0, -120)
 	player.attack_buffer = 0
 	player.step(1.0 / 120, idle)
-	player.step(1.0 / 120, controls({"up": true, "attack": true}))
+	player.velocity.y = -120
+	player.step(1.0 / 120, controls({"axis": 1.0, "up": true, "attack": true}))
 	check(
 		player.attack_direction == Vector2.UP
+		and player.velocity.x == ArenaConfig.RUN_SPEED
+		and is_equal_approx(
+			player.velocity.y,
+			-120.0 + ArenaConfig.PLAYER_GRAVITY / 120.0,
+		)
 		and player.sword_rect().position.y < player.position.y - 100,
-		"Up plus X restores the aerial upward slash",
+		"Aerial upward slash preserves horizontal input and vertical momentum",
+	)
+	player.step(1.0 / 120, controls({"axis": -1.0}))
+	check(
+		player.velocity.x == -ArenaConfig.RUN_SPEED,
+		"Aerial directional slash continues responding to horizontal input",
 	)
 	player.change_state(ArenaPlayer.State.AIR)
 	player.attack_buffer = 0
 	player.velocity = Vector2(0, -80)
-	player.step(1.0 / 120, controls({"down": true, "attack": true}))
+	player.step(1.0 / 120, controls({"axis": -0.5, "down": true, "attack": true}))
 	check(
 		player.attack_direction == Vector2.DOWN
+		and player.velocity.x == -ArenaConfig.RUN_SPEED * 0.5
+		and player.sword_rect().size.x == ArenaConfig.VERTICAL_ATTACK_WIDTH
+		and player.sword_rect().size.x > player.hurtbox().size.x
 		and player.sword_rect().position.y > player.position.y - 30,
-		"Down plus X restores the aerial downward slash",
+		"Aerial downward slash preserves movement and uses the wider hitbox",
 	)
 	check(
 		player.register_hit(456)
