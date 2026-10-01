@@ -100,7 +100,11 @@ func _pursue(_delta: float) -> ArenaBT.Status:
 
 func choose_attack() -> String:
 	var first := ["slam", "wave", "jump"] if kind == 0 else ["thrust", "boomerang", "dive"]
-	var second := ["jump", "combo", "rain", "wave"] if kind == 0 else ["thrust", "fan", "dive", "blades"]
+	var second := (
+		["jump", "combo", "rain", "wave"]
+		if kind == 0
+		else ["thrust", "fan", "dive", "blades"]
+	)
 	var pool: Array = first if phase == 1 else second
 	var choice: String = pool[action_count % pool.size()]
 	action_count += 1
@@ -193,7 +197,11 @@ func mirror_attack() -> bool:
 				velocity.x = facing * 860
 				arena.sound("swing")
 			if event_index == 1:
-				arena.strike(Rect2(position + Vector2(-12 if facing > 0 else -117, -78), Vector2(129, 50)), position)
+				var first_hit := Rect2(
+					position + Vector2(-12 if facing > 0 else -117, -78),
+					Vector2(129, 50),
+				)
+				arena.strike(first_hit, position)
 				if action_time >= (0.9 if phase == 1 else 0.76):
 					velocity.x = 0
 					event_index = 2
@@ -203,7 +211,11 @@ func mirror_attack() -> bool:
 				velocity.x = facing * 900
 				pose = "attack"
 			if event_index == 3:
-				arena.strike(Rect2(position + Vector2(-12 if facing > 0 else -117, -78), Vector2(129, 50)), position)
+				var return_hit := Rect2(
+					position + Vector2(-12 if facing > 0 else -117, -78),
+					Vector2(129, 50),
+				)
+				arena.strike(return_hit, position)
 				if action_time > 1.4:
 					velocity.x = 0
 			return action_time >= (1.30 if phase == 1 else 1.82)
@@ -276,7 +288,9 @@ func slam(both: bool, wave: bool, wide: bool = false) -> void:
 			arena.spawn_wave(position - Vector2(facing * 70, 0), -facing, color())
 
 func hurtbox() -> Rect2:
-	return Rect2(position + Vector2(-29, -121), Vector2(58, 121)) if kind == 0 else Rect2(position + Vector2(-19, -96), Vector2(38, 96))
+	if kind == 0:
+		return Rect2(position + Vector2(-29, -121), Vector2(58, 121))
+	return Rect2(position + Vector2(-19, -96), Vector2(38, 96))
 
 func take_damage(amount: int, from: Vector2) -> bool:
 	if dead or phase_pending:
@@ -298,13 +312,47 @@ func take_damage(amount: int, from: Vector2) -> bool:
 func color() -> Color:
 	return ArenaConfig.AMBER if kind == 0 else ArenaConfig.VIOLET
 
+func visual_progress() -> float:
+	if phase_pending:
+		return clampf(phase_time / 1.2, 0.0, 1.0)
+	if action.is_empty():
+		return 0.0
+	if pose == "windup":
+		var duration := 0.6
+		match action:
+			"slam", "wave":
+				duration = 0.68 if phase == 1 else 0.5
+			"jump":
+				duration = 0.52 if phase == 1 else 0.34
+			"combo":
+				duration = 0.46
+			"thrust":
+				duration = 0.62 if phase == 1 else 0.48
+			"boomerang", "fan":
+				duration = 0.65
+			"dive", "blades":
+				duration = 0.5
+		return clampf(action_time / duration, 0.0, 1.0)
+	if pose == "attack" and action == "combo":
+		return fmod(action_time * 1.8, 1.0)
+	if pose in ["attack", "slam", "down"]:
+		return 0.88
+	return 0.0
+
+func visual_variant() -> int:
+	if action == "thrust":
+		return 2
+	if action in ["boomerang", "fan"]:
+		return 1
+	return 0
+
 func _draw_fighter() -> void:
 	var tint := Color.WHITE if flash > 0 else color()
 	if dead:
 		tint.a = 0.2
 	if phase_pending:
 		tint = tint.lerp(Color.WHITE, (sin(clock * 24) + 1) * 0.4)
-	BoxArt.fighter(visual, pose, clock, tint, kind == 0)
+	BoxArt.fighter(visual, pose, clock, tint, kind == 0, visual_progress(), visual_variant())
 	if kind == 1:
 		BoxArt.bar(visual, Vector2(-6, -58), Vector2(-31, -16), 5, tint.darkened(0.3))
 	if action == "combo" and event_index == 3:

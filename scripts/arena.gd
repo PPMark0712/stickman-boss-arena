@@ -12,6 +12,7 @@ var combat_active := true
 var elapsed := 0.0
 var particles: Array[Dictionary] = []
 var slams: Array[Dictionary] = []
+var slashes: Array[Dictionary] = []
 var shake := 0.0
 var hitstop := 0.0
 var rng := RandomNumberGenerator.new()
@@ -78,6 +79,10 @@ func _process(delta: float) -> void:
 		slams[i].life -= delta
 		if slams[i].life <= 0:
 			slams.remove_at(i)
+	for i in range(slashes.size() - 1, -1, -1):
+		slashes[i].life -= real_delta
+		if slashes[i].life <= 0:
+			slashes.remove_at(i)
 	shake = maxf(0, shake - real_delta * 25)
 	position = Vector2(rng.randf_range(-shake, shake), rng.randf_range(-shake, shake) * 0.6)
 	effects.queue_redraw()
@@ -87,9 +92,12 @@ func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
 		return
 	if source.register_hit(boss.get_instance_id()):
 		boss.take_damage(ArenaConfig.SWORD_DAMAGE, source.position)
-		burst(rect.get_center().lerp(boss.position + Vector2(0, -60), 0.5), ArenaConfig.INK, 15)
-		sound("hit")
-		impact(4, 0.055)
+		var finisher := source.combo_step == 2 and not source.attack_is_air
+		var contact := rect.get_center().lerp(boss.position + Vector2(0, -60), 0.58)
+		burst(contact, Color.WHITE, 24 if finisher else 17)
+		show_slash(contact, source.attack_world_direction(), source.combo_step, ArenaConfig.INK, 0.10)
+		sound("hit_heavy" if finisher else "hit")
+		impact(7 if finisher else 4.5, 0.075 if finisher else 0.052)
 
 func strike(rect: Rect2, from: Vector2) -> void:
 	if combat_active and rect.intersects(player.hurtbox()):
@@ -148,6 +156,22 @@ func burst(at_position: Vector2, tint: Color, count: int) -> void:
 
 func show_slam(rect: Rect2, tint: Color) -> void:
 	slams.append({"rect": rect, "color": tint, "life": 0.18})
+
+func show_slash(
+	origin: Vector2,
+	direction: Vector2,
+	combo: int,
+	tint: Color = ArenaConfig.TEAL,
+	life: float = 0.16,
+) -> void:
+	slashes.append({
+		"position": origin,
+		"direction": direction.normalized(),
+		"combo": combo,
+		"color": tint,
+		"life": life,
+		"max_life": life,
+	})
 
 func impact(power: float, duration: float) -> void:
 	shake = maxf(shake, power)
@@ -211,11 +235,49 @@ func draw_effects() -> void:
 		var tint: Color = slam_.color
 		tint.a = slam_.life * 2.2
 		effects.draw_rect(slam_.rect, tint)
+	for slash in slashes:
+		var alpha: float = slash.life / slash.max_life
+		var base_angle: float = slash.direction.angle()
+		var sweep := -1.0 if slash.combo == 1 else 1.0
+		var reach: float = 88.0 + slash.combo * 9.0
+		for i in 6:
+			var phase := float(i) / 5.0
+			var angle := base_angle + lerpf(-0.48, 0.42, phase) * sweep
+			var start: Vector2 = slash.position + Vector2.from_angle(angle) * (reach * 0.42)
+			var finish: Vector2 = slash.position + Vector2.from_angle(angle) * reach
+			var tint: Color = slash.color
+			tint.a = alpha * (0.18 + phase * 0.10)
+			BoxArt.bar(effects, start, finish, 2.0 + alpha * 2.0, tint)
 	# Ground markers indicate the region of an impending attack.
 	if combat_active and not boss.dead:
 		if boss.pose == "windup" and boss.kind == 0 and not boss.action.is_empty():
-			var width := 155.0
+			var width := 205.0 if boss.action == "combo" else 155.0
 			var x: float = boss.position.x + (0 if boss.facing > 0 else -width)
-			effects.draw_rect(Rect2(x, 590, width, 4), Color(ArenaConfig.DANGER, 0.65))
+			if boss.action == "jump" and not boss.is_on_floor():
+				x = boss.target_x - width * 0.5
+			effects.draw_rect(Rect2(x, 590, width, 3), Color(ArenaConfig.DANGER, 0.24))
+			var fill: float = width * boss.visual_progress()
+			var fill_x: float = x if boss.facing > 0 else x + width - fill
+			effects.draw_rect(Rect2(fill_x, 589, fill, 5), Color(ArenaConfig.DANGER, 0.72))
+		if boss.pose == "windup" and boss.kind == 1 and not boss.action.is_empty():
+			var pulse := 0.48 + sin(boss.clock * 18) * 0.14
+			var origin := boss.position + Vector2(boss.facing * 34, -58)
+			if boss.action == "thrust":
+				var finish := origin + Vector2(boss.facing * 205, 0)
+				BoxArt.bar(effects, origin, finish, 3, Color(ArenaConfig.DANGER, pulse))
+				BoxArt.bar(
+					effects,
+					finish - Vector2(0, 13),
+					finish + Vector2(0, 13),
+					2,
+					Color(ArenaConfig.DANGER, pulse),
+				)
+			elif boss.action in ["boomerang", "fan"]:
+				var count := 3 if boss.action == "fan" else 1
+				for i in count:
+					var angle := lerpf(-0.42, 0.24, float(i) / maxf(1, count - 1))
+					var direction := Vector2(boss.facing, 0).rotated(angle * boss.facing)
+					var tint := Color(ArenaConfig.VIOLET, pulse * 0.72)
+					BoxArt.bar(effects, origin, origin + direction * 88, 2, tint)
 		if boss.kind == 1 and boss.action == "dive" and boss.event_index == 2:
 			effects.draw_rect(Rect2(boss.target_x - 65, 588, 130, 6), ArenaConfig.VIOLET)

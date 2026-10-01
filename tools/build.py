@@ -67,13 +67,25 @@ def main() -> None:
     parser.add_argument("task", choices=["test", "web", "all"], nargs="?", default="all")
     args = parser.parse_args()
     godot = godot_path()
+    (ROOT / "build").mkdir(exist_ok=True)
+    (ROOT / "build/.gdignore").touch()
     run(godot, "import", ["--editor", "--import"])
     if args.task in ("test", "all"):
         for suite in ("player", "gameplay"):
-            run(godot, suite, ["--fixed-fps", "120", "--script", f"tests/{suite}_test.gd"], "0 failures")
+            arguments = [
+                "--fixed-fps",
+                "120",
+                "--script",
+                f"tests/{suite}_test.gd",
+            ]
+            run(godot, suite, arguments, "0 failures")
     if args.task in ("web", "all"):
         templates = ROOT / ".tools/templates"
-        if not all((templates / f"web_nothreads_{mode}.zip").exists() for mode in ("debug", "release")):
+        template_modes = ("debug", "release")
+        if not all(
+            (templates / f"web_nothreads_{mode}.zip").exists()
+            for mode in template_modes
+        ):
             raise RuntimeError("Run python3 tools/fetch_templates.py before exporting.")
         target = ROOT / "build/web"
         if target.exists():

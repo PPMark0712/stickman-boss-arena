@@ -138,7 +138,7 @@ func boss_card(kind: int, pos: Vector2) -> void:
 	var start := button(menu, "进入决斗    →", Rect2(pos + Vector2(24, 242), Vector2(532, 46)), start_fight.bind(kind))
 	start.name = "Boss%d" % kind
 	var art := Node2D.new()
-	art.position = pos + Vector2(451, 219)
+	art.position = pos + Vector2(451, 238 if kind == 0 else 219)
 	art.scale = Vector2.ONE * (1.85 if kind == 0 else 1.7)
 	art.draw.connect(func() -> void: BoxArt.fighter(art, "idle", menu_clock, accent, kind == 0))
 	menu.add_child(art)
@@ -147,7 +147,7 @@ func boss_card(kind: int, pos: Vector2) -> void:
 func controls_footer(parent: Node) -> void:
 	panel(parent, Rect2(48, 620, 1184, 1), Color("#2b3943"))
 	var items := [
-		["← →", "移动"], ["Z", "跳跃 / 二段跳"], ["X", "挥剑"],
+		["← →", "移动"], ["Z", "跳跃 / 二段跳"], ["X", "挥剑 / 三连击"],
 		["↑/↓ + X", "空中上劈 / 下劈"], ["A", "短按法术 / 长按回血"],
 	]
 	var positions := [48, 205, 423, 577, 884]
@@ -212,7 +212,13 @@ func build_hud() -> void:
 	time_label = label(hud, "", Vector2(880, 82), 13, ArenaConfig.MUTED)
 	button(hud, "暂停  Esc", Rect2(1080, 72, 152, 34), toggle_pause)
 	top_buttons(hud)
-	label(hud, "← → 移动     Z 二段跳     X 挥剑     ↑/↓ + X 空中劈斩     A 法术 / 长按回血", Vector2(186, 656), 15, ArenaConfig.MUTED)
+	label(
+		hud,
+		"← → 移动     Z 二段跳     X 三连击     ↑/↓ + X 空中劈斩     A 法术 / 长按回血",
+		Vector2(186, 656),
+		15,
+		ArenaConfig.MUTED,
+	)
 	label(hud, "R  重新挑战", Vector2(1073, 687), 12, ArenaConfig.MUTED)
 	toast = label(hud, "", Vector2(220, 136), 18, ArenaConfig.TEAL)
 	toast.size.x = 840

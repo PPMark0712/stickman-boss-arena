@@ -10,7 +10,7 @@
 | --- | --- |
 | `←` / `→` | 移动 |
 | `Z` | 跳跃 / 二段跳 |
-| `X` | 挥剑 |
+| `X` | 挥剑；连续按下衔接三段攻击 |
 | 空中 `↑` / `↓` + `X` | 上劈 / 下劈 |
 | 短按 `A` | 消耗 3 点能量释放法术 |
 | 长按 `A` 1.5 秒 | 消耗 3 点能量恢复生命 |
@@ -37,7 +37,7 @@ python3 tools/build.py web
 python3 -m http.server 8060 --directory build/web
 ```
 
-浏览器访问 <http://127.0.0.1:8060>。也可运行 `python3 tools/build.py all` 一次完成导入、78 项玩法检查和 Web 导出。若 Godot 不在系统路径或 macOS 默认位置，请设置 `GODOT=/path/to/godot`。
+浏览器访问 <http://127.0.0.1:8060>。也可运行 `python3 tools/build.py all` 一次完成导入、83 项玩法检查和 Web 导出。若 Godot 不在系统路径或 macOS 默认位置，请设置 `GODOT=/path/to/godot`。
 
 ## 项目结构
 
