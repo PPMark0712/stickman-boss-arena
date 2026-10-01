@@ -437,11 +437,15 @@ static func _draw_heavy_fighter(
 
 	if weapon_in_front:
 		_draw_heavy_hammer(canvas, shaft_start, hammer_center, angle, color)
-	var left_shoulder := body_center + Vector2(20 if weapon_in_front else -18, -13)
-	var right_shoulder := body_center + Vector2(-18 if weapon_in_front else 20, -18)
-	var left_elbow := left_shoulder.lerp(left_grip, 0.52) + Vector2(-6, 5)
+	var left_shoulder := body_center + Vector2(10 if weapon_in_front else -18, -13)
+	var right_shoulder := body_center + Vector2(20, -18)
+	var left_elbow := left_shoulder.lerp(left_grip, 0.5) + Vector2(-6, 5)
 	var right_elbow := right_shoulder.lerp(right_grip, 0.5) + Vector2(5, -4)
 	if weapon_in_front:
+		var left_arm := left_grip - left_shoulder
+		var left_bend := Vector2(-left_arm.y, left_arm.x).normalized() * 9
+		left_elbow = left_shoulder.lerp(left_grip, 0.5) + left_bend
+		right_elbow = right_shoulder.lerp(right_grip, 0.5) + Vector2(-14, 13)
 		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, Color(color, color.a * 0.72))
 		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, color)
 		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
