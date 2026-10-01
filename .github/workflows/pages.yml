@@ -1,0 +1,66 @@
+name: Test and publish Web game
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Godot 4.7.2
+        run: |
+          mkdir -p .tools
+          curl --fail --location --retry 3 \
+            https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip \
+            -o .tools/godot.zip
+          unzip -q .tools/godot.zip -d .tools
+          chmod +x .tools/Godot_v4.7.2-stable_linux.x86_64
+          echo "GODOT=$GITHUB_WORKSPACE/.tools/Godot_v4.7.2-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        id: templates
+        with:
+          path: .tools/templates
+          key: godot-4.7.2-web-nothreads-v1
+      - name: Download Web templates
+        if: steps.templates.outputs.cache-hit != 'true'
+        run: python3 tools/fetch_templates.py
+      - name: Test and export
+        run: python3 tools/build.py all
+      - name: Keep verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-logs
+          path: test-results/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/deploy-pages@v4
+        id: deployment
