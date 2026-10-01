@@ -442,10 +442,8 @@ static func _draw_heavy_fighter(
 	var left_elbow := left_shoulder.lerp(left_grip, 0.5) + Vector2(-6, 5)
 	var right_elbow := right_shoulder.lerp(right_grip, 0.5) + Vector2(5, -4)
 	if weapon_in_front:
-		var left_arm := left_grip - left_shoulder
-		var left_bend := Vector2(-left_arm.y, left_arm.x).normalized() * 9
-		left_elbow = left_shoulder.lerp(left_grip, 0.5) + left_bend
-		right_elbow = right_shoulder.lerp(right_grip, 0.5) + Vector2(-14, 13)
+		left_elbow = _two_bone_elbow(left_shoulder, left_grip, 25, 1)
+		right_elbow = _two_bone_elbow(right_shoulder, right_grip, 25, -1)
 		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, Color(color, color.a * 0.72))
 		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, color)
 		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
@@ -455,6 +453,21 @@ static func _draw_heavy_fighter(
 		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, color)
 		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
 		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
+
+static func _two_bone_elbow(
+	shoulder: Vector2,
+	hand: Vector2,
+	segment_length: float,
+	bend_side: float,
+) -> Vector2:
+	var span := hand - shoulder
+	var distance := span.length()
+	if distance <= 0.001:
+		return shoulder + Vector2(segment_length * bend_side, 0)
+	var half_span := minf(distance, segment_length * 2.0) * 0.5
+	var bend := sqrt(maxf(segment_length * segment_length - half_span * half_span, 0.0))
+	var normal := Vector2(-span.y, span.x).normalized() * bend_side
+	return shoulder.lerp(hand, 0.5) + normal * bend
 
 static func _draw_heavy_hammer(
 	canvas: CanvasItem,
