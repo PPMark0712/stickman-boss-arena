@@ -441,10 +441,16 @@ static func _draw_heavy_fighter(
 	var right_shoulder := body_center + Vector2(20, -18)
 	var left_elbow := left_shoulder.lerp(left_grip, 0.52) + Vector2(-6, 5)
 	var right_elbow := right_shoulder.lerp(right_grip, 0.5) + Vector2(5, -4)
-	_limb(canvas, left_shoulder, left_elbow, left_grip, 7, Color(color, color.a * 0.82))
-	_limb(canvas, right_shoulder, right_elbow, right_grip, 7, color)
-	canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
-	canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
+	if weapon_in_front:
+		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, Color(color, color.a * 0.72))
+		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, color)
+		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
+		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
+	else:
+		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, Color(color, color.a * 0.82))
+		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, color)
+		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
+		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
 
 static func _draw_heavy_hammer(
 	canvas: CanvasItem,
