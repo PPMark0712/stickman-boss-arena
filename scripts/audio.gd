@@ -9,6 +9,8 @@ var muted := false
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	muted = DisplayServer.get_name() == "headless"
+	if muted:
+		return
 	var recipes := {
 		"swing": [430.0, 110.0, 0.12, 0.3],
 		"swing1": [470.0, 130.0, 0.11, 0.24],

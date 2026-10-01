@@ -26,7 +26,12 @@ def godot_path() -> str:
     return candidate
 
 
-def run(godot: str, name: str, arguments: list[str], marker: str = "") -> None:
+def run(
+    godot: str,
+    name: str,
+    arguments: list[str],
+    success_pattern: str = "",
+) -> None:
     LOGS.mkdir(exist_ok=True)
     log = LOGS / f"{name}.log"
     command = [godot, "--headless", "--path", str(ROOT), "--log-file", str(log), *arguments]
@@ -52,7 +57,7 @@ def run(godot: str, name: str, arguments: list[str], marker: str = "") -> None:
     if (
         result.returncode
         or re.search(r"(?:SCRIPT ERROR:|ERROR:)", diagnostic_output)
-        or (marker and marker not in diagnostic_output)
+        or (success_pattern and not re.search(success_pattern, diagnostic_output))
     ):
         print(output)
         raise RuntimeError(f"{name} failed; see {LOGS}.")
@@ -78,7 +83,7 @@ def main() -> None:
                 "--script",
                 f"tests/{suite}_test.gd",
             ]
-            run(godot, suite, arguments, "0 failures")
+            run(godot, suite, arguments, r"\b0 failures\b")
     if args.task in ("web", "all"):
         templates = ROOT / ".tools/templates"
         template_modes = ("debug", "release")

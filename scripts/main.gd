@@ -184,6 +184,11 @@ func start_fight(kind: int) -> void:
 	room.finished.connect(show_result)
 	room.message.connect(show_toast)
 	build_hud()
+	room.player.stats_changed.connect(refresh_player_hud)
+	room.boss.health_changed.connect(refresh_boss_hud)
+	room.boss.phase_changed.connect(refresh_boss_hud)
+	refresh_player_hud()
+	refresh_boss_hud()
 	show_toast("练习模式 · 无限生命与能量" if practice else "挥剑命中积攒能量 · 每 3 格可施法或回血", 3)
 
 func build_hud() -> void:
@@ -230,15 +235,33 @@ func _process(delta: float) -> void:
 		if is_instance_valid(art):
 			art.queue_redraw()
 	if is_instance_valid(room) and is_instance_valid(hud):
-		health_label.text = "■ ".repeat(room.player.health) + "□ ".repeat(ArenaConfig.MAX_HEALTH - room.player.health)
-		var energy := room.player.energy
-		energy_label.text = "能量  " + "▰".repeat(energy) + "▱".repeat(ArenaConfig.MAX_ENERGY - energy) + "   %d / 9" % energy
-		boss_bar.value = room.boss.health
-		phase_label.text = "PHASE  %s    ·    %d / %d" % ["II" if room.boss.phase == 2 else "I", room.boss.health, room.boss.max_health]
-		time_label.text = format_time(room.elapsed)
+		var current_time := format_time(room.elapsed)
+		if time_label.text != current_time:
+			time_label.text = current_time
 		if not paused:
 			toast_time -= delta
 			toast.modulate.a = clampf(toast_time * 3, 0, 1)
+
+func refresh_player_hud() -> void:
+	if not is_instance_valid(room) or not is_instance_valid(health_label):
+		return
+	health_label.text = "■ ".repeat(room.player.health) + "□ ".repeat(
+		ArenaConfig.MAX_HEALTH - room.player.health
+	)
+	var energy := room.player.energy
+	energy_label.text = "能量  " + "▰".repeat(energy) + "▱".repeat(
+		ArenaConfig.MAX_ENERGY - energy
+	) + "   %d / 9" % energy
+
+func refresh_boss_hud() -> void:
+	if not is_instance_valid(room) or not is_instance_valid(boss_bar):
+		return
+	boss_bar.value = room.boss.health
+	phase_label.text = "PHASE  %s    ·    %d / %d" % [
+		"II" if room.boss.phase == 2 else "I",
+		room.boss.health,
+		room.boss.max_health,
+	]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause") and is_instance_valid(room) and not result_open:
@@ -290,13 +313,14 @@ func toggle_pause() -> void:
 
 func show_result(won: bool, elapsed: float) -> void:
 	result_open = true
+	var record_save_failed := false
 	if won and not practice:
 		var best: float = records.get_value("best", str(current_kind), 0.0)
 		if best == 0 or elapsed < best:
 			records.set_value("best", str(current_kind), elapsed)
 			var error := records.save("user://records.cfg")
 			if error != OK:
-				show_toast("纪录保存失败，本次成绩仍可查看", 6)
+				record_save_failed = true
 	make_overlay()
 	label(overlay, "挑战完成" if won else "再试一次", Vector2(432, 238), 36, ArenaConfig.TEAL if won else ArenaConfig.DANGER)
 	label(overlay, "DUEL WON" if won else "FALL. LEARN. RETURN.", Vector2(434, 295), 13, ArenaConfig.MUTED)
@@ -304,7 +328,13 @@ func show_result(won: bool, elapsed: float) -> void:
 	label(overlay, detail, Vector2(434, 333), 19)
 	var retry := button(overlay, "再次挑战   R", Rect2(432, 394, 199, 46), start_fight.bind(current_kind))
 	button(overlay, "返回选关", Rect2(649, 394, 199, 46), show_menu)
-	label(overlay, "每次挥剑，离胜利更近一步。", Vector2(434, 475), 14, ArenaConfig.MUTED)
+	label(
+		overlay,
+		"纪录保存失败，本次成绩仍可查看" if record_save_failed else "每次挥剑，离胜利更近一步。",
+		Vector2(434, 475),
+		14,
+		ArenaConfig.DANGER if record_save_failed else ArenaConfig.MUTED,
+	)
 	retry.grab_focus()
 
 func format_time(seconds: float) -> String:

@@ -6,6 +6,16 @@ signal died
 
 enum State { IDLE, RUN, AIR, ATTACK, CAST, HEAL, HURT, DEAD }
 
+class Controls extends RefCounted:
+	var axis := 0.0
+	var jump := false
+	var jump_release := false
+	var attack := false
+	var up := false
+	var down := false
+	var focus := false
+	var focus_release := false
+
 var arena: Node2D
 var state := State.IDLE
 var state_time := 0.0
@@ -34,6 +44,8 @@ var turn_dust_cooldown := 0.0
 var was_grounded := false
 var controlled := true
 var visual: Node2D
+var live_controls := Controls.new()
+var neutral_controls := Controls.new()
 
 func _ready() -> void:
 	collision_layer = 2
@@ -48,29 +60,29 @@ func _ready() -> void:
 	visual.draw.connect(_draw_fighter)
 	add_child(visual)
 
-func change_state(next: State) -> void:
+func change_state(next: State, restart: bool = false) -> void:
+	if state == next and not restart:
+		return
 	state = next
 	state_time = 0.0
-	stats_changed.emit()
 
 func _physics_process(delta: float) -> void:
 	if not arena.combat_active:
 		return
-	step(delta, read_controls() if controlled else {})
+	step(delta, read_controls() if controlled else neutral_controls)
 
-func read_controls() -> Dictionary:
-	return {
-		"axis": Input.get_axis("move_left", "move_right"),
-		"jump": Input.is_action_just_pressed("jump"),
-		"jump_release": Input.is_action_just_released("jump"),
-		"attack": Input.is_action_just_pressed("attack"),
-		"up": Input.is_action_pressed("look_up"),
-		"down": Input.is_action_pressed("look_down"),
-		"focus": Input.is_action_pressed("focus"),
-		"focus_release": Input.is_action_just_released("focus"),
-	}
+func read_controls() -> Controls:
+	live_controls.axis = Input.get_axis("move_left", "move_right")
+	live_controls.jump = Input.is_action_just_pressed("jump")
+	live_controls.jump_release = Input.is_action_just_released("jump")
+	live_controls.attack = Input.is_action_just_pressed("attack")
+	live_controls.up = Input.is_action_pressed("look_up")
+	live_controls.down = Input.is_action_pressed("look_down")
+	live_controls.focus = Input.is_action_pressed("focus")
+	live_controls.focus_release = Input.is_action_just_released("focus")
+	return live_controls
 
-func step(delta: float, controls: Dictionary) -> void:
+func step(delta: float, controls: Controls) -> void:
 	clock += delta
 	state_time += delta
 	invulnerable = maxf(0, invulnerable - delta)
@@ -85,9 +97,9 @@ func step(delta: float, controls: Dictionary) -> void:
 	coyote = ArenaConfig.COYOTE_TIME if is_on_floor() else maxf(0, coyote - delta)
 	if is_on_floor():
 		jumps_used = 0
-	if controls.get("jump", false):
+	if controls.jump:
 		jump_buffer = ArenaConfig.JUMP_BUFFER
-	if controls.get("attack", false):
+	if controls.attack:
 		attack_buffer = ArenaConfig.ATTACK_BUFFER
 		if state == State.ATTACK:
 			attack_queued = true
@@ -100,7 +112,7 @@ func step(delta: float, controls: Dictionary) -> void:
 		visual.queue_redraw()
 		return
 	if state == State.HURT:
-		if controls.get("focus_release", false):
+		if controls.focus_release:
 			focus_cancelled = false
 			focus_consumed = false
 			focus_time = 0
@@ -141,11 +153,11 @@ func step(delta: float, controls: Dictionary) -> void:
 	visual.scale.x = facing
 	visual.queue_redraw()
 
-func handle_movement(delta: float, controls: Dictionary) -> void:
-	var axis: float = controls.get("axis", 0.0)
+func handle_movement(delta: float, controls: Controls) -> void:
+	var axis := controls.axis
 	if state == State.HEAL:
 		velocity.x = move_toward(velocity.x, 0, ArenaConfig.FRICTION * delta)
-		if absf(axis) > 0.1 or controls.get("jump", false) or controls.get("attack", false):
+		if absf(axis) > 0.1 or controls.jump or controls.attack:
 			focus_cancelled = true
 			change_state(State.IDLE)
 		else:
@@ -188,17 +200,22 @@ func handle_movement(delta: float, controls: Dictionary) -> void:
 			change_state(State.AIR)
 		arena.burst(position, ArenaConfig.TEAL, 7)
 		arena.sound("jump")
-	if controls.get("jump_release", false) and velocity.y < -250:
+	if controls.jump_release and velocity.y < -250:
 		velocity.y *= 0.48
 
-func handle_attack(controls: Dictionary) -> void:
+func handle_attack(controls: Controls) -> void:
 	if state == State.ATTACK or attack_buffer <= 0:
 		return
-	if state in [State.CAST, State.HEAL, State.HURT, State.DEAD]:
+	if (
+		state == State.CAST
+		or state == State.HEAL
+		or state == State.HURT
+		or state == State.DEAD
+	):
 		return
 	begin_sword_attack(controls)
 
-func begin_sword_attack(controls: Dictionary) -> void:
+func begin_sword_attack(controls: Controls) -> void:
 	var continuing_ground_combo := (
 		state == State.ATTACK and not attack_is_air and attack_direction.y == 0
 	)
@@ -206,24 +223,23 @@ func begin_sword_attack(controls: Dictionary) -> void:
 	attack_direction = Vector2(facing, 0)
 	if attack_is_air:
 		combo_step = 0
-		if controls.get("down", false):
+		if controls.down:
 			attack_direction = Vector2.DOWN
-		elif controls.get("up", false):
+		elif controls.up:
 			attack_direction = Vector2.UP
 		if attack_direction.y != 0:
 			velocity.y *= 0.62
 		else:
 			velocity.x += facing * 45
 	else:
-		var lunges := [105.0, 135.0, 190.0]
-		velocity.x = facing * maxf(absf(velocity.x), lunges[combo_step])
+		velocity.x = facing * maxf(absf(velocity.x), ArenaConfig.COMBO_LUNGES[combo_step])
 	hit_targets.clear()
 	attack_buffer = 0
 	attack_queued = false
 	slash_emitted = false
-	change_state(State.ATTACK)
+	change_state(State.ATTACK, true)
 
-func finish_sword_attack(controls: Dictionary) -> void:
+func finish_sword_attack(controls: Controls) -> void:
 	var can_combo := not attack_is_air and attack_direction.y == 0
 	var next_combo := (combo_step + 1) % 3 if can_combo else 0
 	if attack_queued or attack_buffer > 0:
@@ -252,14 +268,14 @@ func attack_world_direction() -> Vector2:
 		return Vector2.DOWN
 	return Vector2(facing, 0)
 
-func handle_focus(delta: float, controls: Dictionary) -> void:
-	if state in [State.ATTACK, State.CAST]:
-		if controls.get("focus_release", false):
+func handle_focus(delta: float, controls: Controls) -> void:
+	if state == State.ATTACK or state == State.CAST:
+		if controls.focus_release:
 			focus_time = 0
 			focus_cancelled = false
 			focus_consumed = false
-		return
-	if controls.get("focus", false):
+			return
+	if controls.focus:
 		focus_time += delta
 		if focus_time >= 0.22 and not focus_consumed and not focus_cancelled:
 			if energy < ArenaConfig.ENERGY_COST:
@@ -271,7 +287,7 @@ func handle_focus(delta: float, controls: Dictionary) -> void:
 			elif not is_on_floor():
 				arena.notify("落地后长按 A 回血")
 				focus_cancelled = true
-			elif state not in [State.ATTACK, State.CAST]:
+			elif state != State.ATTACK and state != State.CAST:
 				if state != State.HEAL:
 					change_state(State.HEAL)
 				if focus_time >= ArenaConfig.HEAL_TIME:
@@ -282,7 +298,7 @@ func handle_focus(delta: float, controls: Dictionary) -> void:
 					arena.burst(position + Vector2(0, -40), ArenaConfig.TEAL, 22)
 					arena.sound("heal")
 					stats_changed.emit()
-	if controls.get("focus_release", false):
+	if controls.focus_release:
 		if focus_time > 0 and focus_time < 0.22 and not focus_consumed and not focus_cancelled:
 			cast_spell()
 		if state == State.HEAL:
@@ -292,7 +308,12 @@ func handle_focus(delta: float, controls: Dictionary) -> void:
 		focus_consumed = false
 
 func cast_spell() -> bool:
-	if state in [State.ATTACK, State.CAST, State.HURT, State.DEAD]:
+	if (
+		state == State.ATTACK
+		or state == State.CAST
+		or state == State.HURT
+		or state == State.DEAD
+	):
 		return false
 	if energy < ArenaConfig.ENERGY_COST:
 		arena.notify("需要 3 格能量 · 挥剑命中可积攒")
@@ -309,9 +330,9 @@ func sword_rect() -> Rect2:
 		return Rect2(position + Vector2(-31, -139), Vector2(62, 83))
 	if attack_direction == Vector2.DOWN:
 		return Rect2(position + Vector2(-32, -18), Vector2(64, 85))
-	var reach: float = [96.0, 104.0, 122.0][combo_step]
-	var height: float = [64.0, 82.0, 54.0][combo_step]
-	var top: float = [-72.0, -91.0, -66.0][combo_step]
+	var reach: float = ArenaConfig.COMBO_REACHES[combo_step]
+	var height: float = ArenaConfig.COMBO_HEIGHTS[combo_step]
+	var top: float = ArenaConfig.COMBO_TOPS[combo_step]
 	return Rect2(position + Vector2(8 if facing > 0 else -reach - 8, top), Vector2(reach, height))
 
 func hurtbox() -> Rect2:
@@ -326,9 +347,17 @@ func register_hit(target_id: int) -> bool:
 		velocity.y = -610
 		jumps_used = 1
 	else:
-		velocity.x = -facing * (85 if not is_on_floor() else [48, 34, 18][combo_step])
+		var recoil: float = 85.0 if not is_on_floor() else ArenaConfig.GROUND_HIT_RECOILS[combo_step]
+		velocity.x = -facing * recoil
 	stats_changed.emit()
 	return true
+
+func restore_practice_stats() -> void:
+	if health == ArenaConfig.MAX_HEALTH and energy == ArenaConfig.MAX_ENERGY:
+		return
+	health = ArenaConfig.MAX_HEALTH
+	energy = ArenaConfig.MAX_ENERGY
+	stats_changed.emit()
 
 func take_damage(amount: int, from: Vector2) -> bool:
 	if invulnerable > 0 or state == State.DEAD:

@@ -31,7 +31,30 @@ func run() -> void:
 		room.player.invulnerable = 1000
 		check(room.player.is_on_floor(), "Player grounded at fight start")
 		check(room.boss.health == room.boss.max_health, "Boss starts at full health")
-		var phase1: Array = ["slam", "wave", "jump"] if kind == 0 else ["thrust", "boomerang", "dive"]
+		room.spawn_wave(Vector2(640, ArenaConfig.FLOOR_Y), 1, room.boss.color())
+		var cleared_hazard := room.hazards.get_child(
+			room.hazards.get_child_count() - 1
+		) as ArenaHazard
+		room.clear_hazards()
+		check(
+			not cleared_hazard.active
+			and not cleared_hazard.visible
+			and not cleared_hazard.is_physics_processing(),
+			"Hazard cleanup deactivates immediately",
+		)
+		Engine.time_scale = 0.8
+		room.impact(2, 0.02)
+		check(
+			is_equal_approx(Engine.time_scale, ArenaConfig.HITSTOP_SCALE),
+			"Impact applies configured hitstop scale",
+		)
+		room.restore_time_scale()
+		check(is_equal_approx(Engine.time_scale, 0.8), "Hitstop restores previous time scale")
+		Engine.time_scale = 1.0
+		await frames(1)
+		var phase1: Array = (
+			["slam", "wave", "jump"] if kind == 0 else ["thrust", "boomerang", "dive"]
+		)
 		for attack: String in phase1:
 			await verify_attack(room, attack)
 		room.boss.take_damage(room.boss.max_health / 2, room.player.position)
@@ -39,7 +62,12 @@ func run() -> void:
 		check(not room.boss.take_damage(10, room.player.position), "Transition is invulnerable")
 		await frames(180)
 		check(room.boss.phase == 2 and not room.boss.phase_pending, "Phase two completes")
-		var phase2: Array = ["jump", "combo", "rain", "wave"] if kind == 0 else ["thrust", "fan", "dive", "blades"]
+		check(game.phase_label.text.contains("II"), "Phase signal refreshes HUD")
+		var phase2: Array = (
+			["jump", "combo", "rain", "wave"]
+			if kind == 0
+			else ["thrust", "fan", "dive", "blades"]
+		)
 		for attack: String in phase2:
 			await verify_attack(room, attack)
 		if kind == 0:
@@ -57,19 +85,33 @@ func run() -> void:
 		room.player.facing = 1
 		room.player.attack_direction = Vector2.RIGHT
 		room.player.hit_targets.clear()
+		room.player.energy = 0
+		room.player.stats_changed.emit()
+		check(game.energy_label.text.ends_with("0 / 9"), "Player stat signal refreshes HUD")
 		var hp := room.boss.health
 		room.resolve_sword(room.player, room.player.sword_rect())
 		room.resolve_sword(room.player, room.player.sword_rect())
 		check(room.boss.health == hp - ArenaConfig.SWORD_DAMAGE, "Sword damages once per swing")
+		check(
+			game.energy_label.text.ends_with("1 / 9")
+			and int(game.boss_bar.value) == room.boss.health,
+			"Combat signals update HUD without polling",
+		)
 		room.spawn_spell(Vector2(540, ArenaConfig.FLOOR_Y - 35), 1)
 		await frames(45)
-		check(room.boss.health == hp - ArenaConfig.SWORD_DAMAGE - ArenaConfig.SPELL_DAMAGE, "Spell damages boss")
+		check(
+			room.boss.health == hp - ArenaConfig.SWORD_DAMAGE - ArenaConfig.SPELL_DAMAGE,
+			"Spell damages boss",
+		)
 		game.toggle_pause()
 		var saved_time := room.elapsed
 		var saved_position := room.player.position
 		for i in 15:
 			await process_frame
-		check(paused and room.elapsed == saved_time and room.player.position == saved_position, "Pause freezes combat")
+		check(
+			paused and room.elapsed == saved_time and room.player.position == saved_position,
+			"Pause freezes combat",
+		)
 		game.toggle_pause()
 		check(not paused, "Resume unpauses")
 		room.boss.take_damage(999, room.player.position)
@@ -78,7 +120,10 @@ func run() -> void:
 		check(room.hazards.get_child_count() == 0, "Victory clears hazards")
 		game.start_fight(kind)
 		await frames(4)
-		check(not game.result_open and game.room.player.health == ArenaConfig.MAX_HEALTH, "Retry resets fight")
+		check(
+			not game.result_open and game.room.player.health == ArenaConfig.MAX_HEALTH,
+			"Retry resets fight",
+		)
 		game.room.player.invulnerable = 0
 		game.room.player.take_damage(99, Vector2.ZERO)
 		await frames(3)

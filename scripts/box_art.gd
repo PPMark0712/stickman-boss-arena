@@ -3,8 +3,10 @@ extends RefCounted
 ## Even diagonals, particles and curved-looking effects are made of rectangles.
 
 static func bar(canvas: CanvasItem, a: Vector2, b: Vector2, width: float, color: Color) -> void:
-	canvas.draw_set_transform((a + b) * 0.5, (b - a).angle())
-	canvas.draw_rect(Rect2(-a.distance_to(b) * 0.5, -width * 0.5, a.distance_to(b), width), color)
+	var delta := b - a
+	var length := delta.length()
+	canvas.draw_set_transform((a + b) * 0.5, delta.angle())
+	canvas.draw_rect(Rect2(-length * 0.5, -width * 0.5, length, width), color)
 	canvas.draw_set_transform(Vector2.ZERO)
 
 static func outline(canvas: CanvasItem, rect: Rect2, color: Color, width: float = 2.0) -> void:
@@ -45,7 +47,7 @@ static func fighter(
 		lean = -5.0
 	elif pose == "cast":
 		lean = 8.0
-	elif pose in ["attack", "up", "down"]:
+	elif pose == "attack" or pose == "up" or pose == "down":
 		lean = lerpf(-6.0, 10.0, swing)
 	elif pose == "windup":
 		lean = -8.0
@@ -61,7 +63,14 @@ static func fighter(
 	if pose == "air":
 		left_foot = Vector2(-17, -13)
 		right_foot = Vector2(18, -7)
-	elif pose in ["attack", "up", "down", "cast", "windup", "slam"]:
+	elif (
+		pose == "attack"
+		or pose == "up"
+		or pose == "down"
+		or pose == "cast"
+		or pose == "windup"
+		or pose == "slam"
+	):
 		left_foot = Vector2(-18, -2)
 		right_foot = Vector2(19, -2)
 	if squash > 0:
@@ -129,7 +138,7 @@ static func _draw_sword(
 		extension = 0.75 + _swing_curve(progress) * 0.45
 	var hand := shoulder + Vector2.from_angle(angle) * 31.0 * extension
 	var tip := hand + Vector2.from_angle(angle) * 48.0
-	if pose in ["attack", "up", "down"]:
+	if pose == "attack" or pose == "up" or pose == "down":
 		for i in range(3, 0, -1):
 			var old_progress := maxf(0.0, progress - i * 0.045)
 			var old_angle := _weapon_angle(pose, old_progress, variant)

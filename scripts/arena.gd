@@ -4,17 +4,70 @@ extends Node2D
 signal finished(won: bool, elapsed: float)
 signal message(text: String, duration: float)
 
+class ParticleEffect extends RefCounted:
+	var position: Vector2
+	var velocity: Vector2
+	var life: float
+	var size: float
+	var color: Color
+
+	func _init(
+		at_position: Vector2,
+		initial_velocity: Vector2,
+		duration: float,
+		edge: float,
+		tint: Color,
+	) -> void:
+		position = at_position
+		velocity = initial_velocity
+		life = duration
+		size = edge
+		color = tint
+
+class SlamEffect extends RefCounted:
+	var rect: Rect2
+	var color: Color
+	var life := 0.18
+
+	func _init(area: Rect2, tint: Color) -> void:
+		rect = area
+		color = tint
+
+class SlashEffect extends RefCounted:
+	var position: Vector2
+	var direction: Vector2
+	var combo: int
+	var color: Color
+	var life: float
+	var max_life: float
+
+	func _init(
+		origin: Vector2,
+		heading: Vector2,
+		combo_step: int,
+		tint: Color,
+		duration: float,
+	) -> void:
+		position = origin
+		direction = heading.normalized()
+		combo = combo_step
+		color = tint
+		life = duration
+		max_life = duration
+
 var kind := 0
 var practice := false
 var player: ArenaPlayer
 var boss: ArenaBoss
 var combat_active := true
 var elapsed := 0.0
-var particles: Array[Dictionary] = []
-var slams: Array[Dictionary] = []
-var slashes: Array[Dictionary] = []
+var particles: Array[ParticleEffect] = []
+var slams: Array[SlamEffect] = []
+var slashes: Array[SlashEffect] = []
 var shake := 0.0
 var hitstop := 0.0
+var previous_time_scale := 1.0
+var owns_time_scale := false
 var rng := RandomNumberGenerator.new()
 var backdrop: Node2D
 var effects: Node2D
@@ -58,18 +111,17 @@ func make_wall(center: Vector2, size: Vector2) -> void:
 	add_child(body)
 
 func _process(delta: float) -> void:
-	var real_delta := delta / Engine.time_scale
+	var real_delta := delta / maxf(Engine.time_scale, 0.001)
 	if hitstop > 0:
 		hitstop -= real_delta
 		if hitstop <= 0:
-			Engine.time_scale = 1.0
+			restore_time_scale()
 	if combat_active:
 		elapsed += delta
 		if practice:
-			player.health = ArenaConfig.MAX_HEALTH
-			player.energy = ArenaConfig.MAX_ENERGY
+			player.restore_practice_stats()
 	for i in range(particles.size() - 1, -1, -1):
-		var particle: Dictionary = particles[i]
+		var particle := particles[i]
 		particle.life -= delta
 		particle.position += particle.velocity * delta
 		particle.velocity.y += 650 * delta
@@ -141,21 +193,23 @@ func new_hazard(type: String, at_position: Vector2, tint: Color) -> ArenaHazard:
 	return projectile
 
 func clear_hazards() -> void:
-	for hazard in hazards.get_children():
-		hazard.queue_free()
+	for child in hazards.get_children():
+		var hazard := child as ArenaHazard
+		if hazard:
+			hazard.deactivate()
 
 func burst(at_position: Vector2, tint: Color, count: int) -> void:
 	for i in count:
-		particles.append({
-			"position": at_position,
-			"velocity": Vector2(rng.randf_range(-260, 260), rng.randf_range(-290, 80)),
-			"life": rng.randf_range(0.18, 0.55),
-			"size": rng.randf_range(2, 6),
-			"color": tint,
-		})
+		particles.append(ParticleEffect.new(
+			at_position,
+			Vector2(rng.randf_range(-260, 260), rng.randf_range(-290, 80)),
+			rng.randf_range(0.18, 0.55),
+			rng.randf_range(2, 6),
+			tint,
+		))
 
 func show_slam(rect: Rect2, tint: Color) -> void:
-	slams.append({"rect": rect, "color": tint, "life": 0.18})
+	slams.append(SlamEffect.new(rect, tint))
 
 func show_slash(
 	origin: Vector2,
@@ -164,19 +218,21 @@ func show_slash(
 	tint: Color = ArenaConfig.TEAL,
 	life: float = 0.16,
 ) -> void:
-	slashes.append({
-		"position": origin,
-		"direction": direction.normalized(),
-		"combo": combo,
-		"color": tint,
-		"life": life,
-		"max_life": life,
-	})
+	slashes.append(SlashEffect.new(origin, direction, combo, tint, life))
 
 func impact(power: float, duration: float) -> void:
 	shake = maxf(shake, power)
 	hitstop = maxf(hitstop, duration)
-	Engine.time_scale = 0.12
+	if not owns_time_scale:
+		previous_time_scale = Engine.time_scale
+		owns_time_scale = true
+	Engine.time_scale = ArenaConfig.HITSTOP_SCALE
+
+func restore_time_scale() -> void:
+	hitstop = 0
+	if owns_time_scale and is_equal_approx(Engine.time_scale, ArenaConfig.HITSTOP_SCALE):
+		Engine.time_scale = previous_time_scale
+	owns_time_scale = false
 
 func sound(key: String) -> void:
 	var audio := get_node_or_null("/root/Sfx")
@@ -191,13 +247,12 @@ func end_fight(won: bool) -> void:
 		return
 	combat_active = false
 	clear_hazards()
-	Engine.time_scale = 1
-	hitstop = 0
+	restore_time_scale()
 	sound("win" if won else "hurt")
 	finished.emit(won, elapsed)
 
 func _exit_tree() -> void:
-	Engine.time_scale = 1
+	restore_time_scale()
 
 func draw_room() -> void:
 	var accent := ArenaConfig.AMBER if kind == 0 else ArenaConfig.VIOLET
@@ -272,7 +327,7 @@ func draw_effects() -> void:
 					2,
 					Color(ArenaConfig.DANGER, pulse),
 				)
-			elif boss.action in ["boomerang", "fan"]:
+			elif boss.action == "boomerang" or boss.action == "fan":
 				var count := 3 if boss.action == "fan" else 1
 				for i in count:
 					var angle := lerpf(-0.42, 0.24, float(i) / maxf(1, count - 1))

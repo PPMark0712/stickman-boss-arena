@@ -1,6 +1,8 @@
 class_name ArenaHazard
 extends Node2D
 
+const WAVE_HEIGHTS := [17, 31, 47, 54, 43, 29, 12]
+
 var arena: Node2D
 var kind := "wave"
 var velocity := Vector2.ZERO
@@ -13,24 +15,26 @@ var triggered := false
 var size := Vector2(42, 50)
 var origin_x := 0.0
 var launch_direction := 0.0
+var active := true
 
 func _ready() -> void:
 	origin_x = position.x
 	add_to_group("hazards")
 
 func _physics_process(delta: float) -> void:
-	if not arena.combat_active:
+	if not active or not arena.combat_active:
 		return
 	age += delta
 	if launch_direction == 0:
 		launch_direction = signf(velocity.x)
 	if age >= lifetime:
-		queue_free()
+		deactivate()
 		return
-	if kind in ["rock", "sword_rain"] and age < warning:
+	var falling := kind == "rock" or kind == "sword_rain"
+	if falling and age < warning:
 		queue_redraw()
 		return
-	if kind in ["rock", "sword_rain"]:
+	if falling:
 		velocity.y += 1600 * delta
 	if kind == "blade" and returning:
 		velocity.x -= launch_direction * 520 * delta
@@ -43,17 +47,28 @@ func _physics_process(delta: float) -> void:
 				arena.burst(position, tint, 20)
 				arena.sound("hit")
 				arena.impact(4, 0.04)
-				queue_free()
+				deactivate()
+				return
 	else:
 		if rect.intersects(arena.player.hurtbox()):
 			arena.player.take_damage(1, position)
-	if kind in ["rock", "sword_rain"] and position.y >= ArenaConfig.FLOOR_Y:
+	if falling and position.y >= ArenaConfig.FLOOR_Y:
 		arena.burst(Vector2(position.x, ArenaConfig.FLOOR_Y), tint, 12)
 		arena.show_slam(Rect2(position.x - 26, ArenaConfig.FLOOR_Y - 12, 52, 12), tint)
-		queue_free()
+		deactivate()
+		return
 	if position.x < -100 or position.x > 1380 or position.y > 800 or position.y < -500:
-		queue_free()
+		deactivate()
+		return
 	queue_redraw()
+
+func deactivate() -> void:
+	if not active:
+		return
+	active = false
+	set_physics_process(false)
+	visible = false
+	queue_free()
 
 func hitbox() -> Rect2:
 	return Rect2(position - Vector2(size.x * 0.5, size.y), size)
@@ -63,7 +78,7 @@ func _draw() -> void:
 		"wave":
 			# Uneven half-dome silhouette assembled from rectangular columns.
 			for i in 7:
-				var height: int = [17, 31, 47, 54, 43, 29, 12][i]
+				var height: int = WAVE_HEIGHTS[i]
 				draw_rect(Rect2(-25 + i * 7, -height, 5, height), Color(tint, 0.68))
 				draw_rect(Rect2(-25 + i * 7, -height, 5, 4), tint)
 		"spell":

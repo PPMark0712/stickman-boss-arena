@@ -3,6 +3,12 @@ extends CharacterBody2D
 
 signal defeated
 signal phase_changed
+signal health_changed
+
+const HAMMER_PHASE_ONE := ["slam", "wave", "jump"]
+const HAMMER_PHASE_TWO := ["jump", "combo", "rain", "wave"]
+const MIRROR_PHASE_ONE := ["thrust", "boomerang", "dive"]
+const MIRROR_PHASE_TWO := ["thrust", "fan", "dive", "blades"]
 
 var arena: Node2D
 var kind := 0
@@ -99,13 +105,9 @@ func _pursue(_delta: float) -> ArenaBT.Status:
 	return ArenaBT.Status.RUNNING
 
 func choose_attack() -> String:
-	var first := ["slam", "wave", "jump"] if kind == 0 else ["thrust", "boomerang", "dive"]
-	var second := (
-		["jump", "combo", "rain", "wave"]
-		if kind == 0
-		else ["thrust", "fan", "dive", "blades"]
-	)
-	var pool: Array = first if phase == 1 else second
+	var pool := HAMMER_PHASE_ONE if kind == 0 else MIRROR_PHASE_ONE
+	if phase == 2:
+		pool = HAMMER_PHASE_TWO if kind == 0 else MIRROR_PHASE_TWO
 	var choice: String = pool[action_count % pool.size()]
 	action_count += 1
 	return choice
@@ -131,7 +133,7 @@ func _perform_attack(delta: float) -> ArenaBT.Status:
 	action = ""
 	velocity.x = 0
 	pose = "idle"
-	cooldown = (0.80 if kind == 0 else 0.64) if phase == 1 else 0.52
+	cooldown = attack_cooldown()
 	return ArenaBT.Status.SUCCESS
 
 func at(time: float, index: int) -> bool:
@@ -143,11 +145,11 @@ func at(time: float, index: int) -> bool:
 func hammer_attack() -> bool:
 	match action:
 		"slam", "wave":
-			if at(0.68 if phase == 1 else 0.5, 0):
+			if at(windup_duration(), 0):
 				slam(false, action == "wave")
 			return action_time >= (1.18 if phase == 1 else 0.92)
 		"jump":
-			if at(0.52 if phase == 1 else 0.34, 0):
+			if at(windup_duration(), 0):
 				launch(-810 if phase == 1 else -900)
 			if event_index == 1:
 				pose = "windup"
@@ -192,7 +194,7 @@ func hammer_attack() -> bool:
 func mirror_attack() -> bool:
 	match action:
 		"thrust":
-			if at(0.62 if phase == 1 else 0.48, 0):
+			if at(windup_duration(), 0):
 				pose = "attack"
 				velocity.x = facing * 860
 				arena.sound("swing")
@@ -302,6 +304,7 @@ func take_damage(amount: int, from: Vector2) -> bool:
 	if health <= max_health / 2 and phase == 1 and health > 0:
 		phase_pending = true
 		tree.reset()
+	health_changed.emit()
 	if health == 0:
 		dead = true
 		pose = "hurt"
@@ -312,37 +315,46 @@ func take_damage(amount: int, from: Vector2) -> bool:
 func color() -> Color:
 	return ArenaConfig.AMBER if kind == 0 else ArenaConfig.VIOLET
 
+func attack_cooldown() -> float:
+	if phase == 2:
+		return 0.52
+	return 0.80 if kind == 0 else 0.64
+
+func windup_duration() -> float:
+	match action:
+		"slam", "wave":
+			return 0.68 if phase == 1 else 0.5
+		"jump":
+			return 0.52 if phase == 1 else 0.34
+		"combo":
+			return 0.46
+		"rain":
+			return 0.60
+		"thrust":
+			return 0.62 if phase == 1 else 0.48
+		"boomerang", "fan":
+			return 0.65
+		"dive", "blades":
+			return 0.5
+	return 0.6
+
 func visual_progress() -> float:
 	if phase_pending:
 		return clampf(phase_time / 1.2, 0.0, 1.0)
 	if action.is_empty():
 		return 0.0
 	if pose == "windup":
-		var duration := 0.6
-		match action:
-			"slam", "wave":
-				duration = 0.68 if phase == 1 else 0.5
-			"jump":
-				duration = 0.52 if phase == 1 else 0.34
-			"combo":
-				duration = 0.46
-			"thrust":
-				duration = 0.62 if phase == 1 else 0.48
-			"boomerang", "fan":
-				duration = 0.65
-			"dive", "blades":
-				duration = 0.5
-		return clampf(action_time / duration, 0.0, 1.0)
+		return clampf(action_time / windup_duration(), 0.0, 1.0)
 	if pose == "attack" and action == "combo":
 		return fmod(action_time * 1.8, 1.0)
-	if pose in ["attack", "slam", "down"]:
+	if pose == "attack" or pose == "slam" or pose == "down":
 		return 0.88
 	return 0.0
 
 func visual_variant() -> int:
 	if action == "thrust":
 		return 2
-	if action in ["boomerang", "fan"]:
+	if action == "boomerang" or action == "fan":
 		return 1
 	return 0
 
