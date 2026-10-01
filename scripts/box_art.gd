@@ -2,6 +2,14 @@ class_name BoxArt
 extends RefCounted
 ## Even diagonals, particles and curved-looking effects are made of rectangles.
 
+class HeavyPose extends RefCounted:
+	var body_lean := 0.0
+	var body_lift := 0.0
+	var hammer_angle := -2.22
+	var right_grip := Vector2(27, -28)
+	var left_foot := Vector2(-17, -2)
+	var right_foot := Vector2(17, -2)
+
 static func bar(canvas: CanvasItem, a: Vector2, b: Vector2, width: float, color: Color) -> void:
 	var delta := b - a
 	var length := delta.length()
@@ -370,80 +378,46 @@ static func _draw_heavy_fighter(
 ) -> void:
 	progress = clampf(progress, 0.0, 1.0)
 	var gait := clock * 8.5
-	var stride := sin(gait) * (8.0 if pose == "run" else 0.0)
+	var motion := _heavy_motion(pose, progress, clock)
+	var stride := sin(gait) * 8.0 if pose == "run" else 0.0
 	var bounce := absf(cos(gait)) * 1.2 if pose == "run" else sin(clock * 2.4) * 0.45
-	var lean := 0.0
-	if pose == "windup":
-		lean = lerpf(0.0, -7.0, _ease_segment(progress, 0.0, 0.72))
-	elif pose == "slam":
-		lean = lerpf(-5.0, 11.0, _ease_segment(progress, 0.0, 0.72))
-	elif pose == "attack":
-		lean = sin(progress * TAU) * 7.0
-	elif pose == "air":
-		lean = 4.0
-	elif pose == "hurt":
-		lean = -10.0
-
-	var body_center := Vector2(lean * 0.35, -48 + bounce + squash * 5)
+	var body_center := Vector2(
+		motion.body_lean * 0.35,
+		-48 + bounce + squash * 5 + motion.body_lift,
+	)
 	var body_rect := Rect2(body_center - Vector2(23, 28), Vector2(46, 56))
 	var left_hip := body_center + Vector2(-12, 27)
 	var right_hip := body_center + Vector2(12, 27)
-	var left_foot := Vector2(-17 - stride, -2)
-	var right_foot := Vector2(17 + stride, -2)
-	if pose == "air":
-		left_foot = Vector2(-21, -10)
-		right_foot = Vector2(20, -7)
-	elif pose == "slam":
-		left_foot = Vector2(-23, -2)
-		right_foot = Vector2(24, -2)
+	var left_foot := motion.left_foot + Vector2(-stride, 0)
+	var right_foot := motion.right_foot + Vector2(stride, 0)
 	var left_knee := left_hip.lerp(left_foot, 0.52) + Vector2(-5, 1)
 	var right_knee := right_hip.lerp(right_foot, 0.52) + Vector2(5, 1)
 	_limb(canvas, left_hip, left_knee, left_foot, 8, Color(color, color.a * 0.78))
 	_limb(canvas, right_hip, right_knee, right_foot, 8, color)
 
-	var angle := -2.24
-	if pose == "run":
-		angle += sin(gait) * 0.08
-	elif pose == "windup":
-		angle = lerp_angle(-2.24, -1.72, _ease_segment(progress, 0.0, 0.82))
-	elif pose == "slam":
-		angle = lerp_angle(-1.72, 0.60, _ease_segment(progress, 0.0, 0.72))
-	elif pose == "attack":
-		angle = -1.72 + progress * TAU * 1.8
-	elif pose == "air":
-		angle = -1.96
-	elif pose == "hurt":
-		angle = 0.35
-
-	var shaft_direction := Vector2.from_angle(angle)
-	var right_grip := body_center + Vector2(18, -17)
-	if pose == "windup":
-		right_grip += Vector2(0, -5)
-	elif pose == "slam":
-		right_grip += Vector2(6, 14)
+	var shaft_direction := Vector2.from_angle(motion.hammer_angle)
+	var right_grip := body_center + motion.right_grip
 	var left_grip := right_grip - shaft_direction * 34
-	var shaft_start := left_grip - shaft_direction * 12
+	var shaft_start := left_grip - shaft_direction * 5
 	var hammer_center := right_grip + shaft_direction * 80
 	if not weapon_in_front:
-		_draw_heavy_hammer(canvas, shaft_start, hammer_center, angle, color)
+		_draw_heavy_hammer(canvas, shaft_start, hammer_center, motion.hammer_angle, color)
 
 	canvas.draw_rect(body_rect, Color("#202a33"))
 	outline(canvas, body_rect, color, 4)
-	var head_center := body_center + Vector2(lean * 0.12, -42)
+	var head_center := body_center + Vector2(motion.body_lean * 0.12, -42)
 	var head := Rect2(head_center - Vector2(12, 11), Vector2(24, 22))
 	canvas.draw_rect(head, Color("#101c27"))
 	outline(canvas, head, color, 4)
 	canvas.draw_rect(Rect2(head_center + Vector2(3, -3), Vector2(10, 4)), color)
 
 	if weapon_in_front:
-		_draw_heavy_hammer(canvas, shaft_start, hammer_center, angle, color)
-	var left_shoulder := body_center + Vector2(10 if weapon_in_front else -18, -13)
-	var right_shoulder := body_center + Vector2(20, -18)
-	var left_elbow := left_shoulder.lerp(left_grip, 0.5) + Vector2(-6, 5)
-	var right_elbow := right_shoulder.lerp(right_grip, 0.5) + Vector2(5, -4)
+		_draw_heavy_hammer(canvas, shaft_start, hammer_center, motion.hammer_angle, color)
+	var left_shoulder := body_center + Vector2(8, -15)
+	var right_shoulder := body_center + Vector2(18, -21)
+	var left_elbow := _two_bone_elbow(left_shoulder, left_grip, 27, 1)
+	var right_elbow := _two_bone_elbow(right_shoulder, right_grip, 27, 1)
 	if weapon_in_front:
-		left_elbow = _two_bone_elbow(left_shoulder, left_grip, 25, 1)
-		right_elbow = _two_bone_elbow(right_shoulder, right_grip, 25, -1)
 		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, Color(color, color.a * 0.72))
 		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, color)
 		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
@@ -453,6 +427,113 @@ static func _draw_heavy_fighter(
 		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, color)
 		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
 		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
+
+static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyPose:
+	var rest := _heavy_key_pose("rest")
+	match pose:
+		"run":
+			rest.body_lift = sin(clock * 8.5) * 1.5
+			rest.hammer_angle += sin(clock * 8.5) * 0.045
+			rest.right_grip += Vector2(0, cos(clock * 8.5) * 1.5)
+			return rest
+		"windup":
+			return _blend_heavy_poses(rest, _heavy_key_pose("raised"), _ease_in_out(progress))
+		"slam":
+			return _blend_heavy_poses(
+				_heavy_key_pose("raised"),
+				_heavy_key_pose("impact"),
+				_ease_in(progress),
+			)
+		"attack":
+			var spin := _heavy_key_pose("raised")
+			var rotation := progress * TAU * 1.8
+			spin.body_lean = sin(rotation) * 7.0
+			spin.right_grip = Vector2(25, -30) + Vector2(
+				cos(rotation) * 4.0,
+				sin(rotation) * 5.0,
+			)
+			spin.hammer_angle = -1.55 + rotation
+			return spin
+		"air":
+			return _heavy_key_pose("airborne")
+		"hurt":
+			return _heavy_key_pose("hurt")
+	return rest
+
+static func _heavy_key_pose(name: String) -> HeavyPose:
+	var key := HeavyPose.new()
+	match name:
+		"raised":
+			key.body_lean = -7.0
+			key.body_lift = -1.0
+			key.hammer_angle = -1.55
+			key.right_grip = Vector2(24, -45)
+			key.left_foot = Vector2(-22, -2)
+			key.right_foot = Vector2(22, -2)
+		"impact":
+			key.body_lean = 12.0
+			key.body_lift = 3.0
+			key.hammer_angle = 0.78
+			key.right_grip = Vector2(32, -4)
+			key.left_foot = Vector2(-26, -2)
+			key.right_foot = Vector2(25, -2)
+		"airborne":
+			key.body_lean = 4.0
+			key.body_lift = -6.0
+			key.hammer_angle = -1.90
+			key.right_grip = Vector2(26, -32)
+			key.left_foot = Vector2(-21, -10)
+			key.right_foot = Vector2(20, -7)
+		"hurt":
+			key.body_lean = -10.0
+			key.body_lift = 2.0
+			key.hammer_angle = 0.42
+			key.right_grip = Vector2(22, -17)
+			key.left_foot = Vector2(-20, -2)
+			key.right_foot = Vector2(13, -2)
+	return key
+
+static func _blend_heavy_poses(from: HeavyPose, to: HeavyPose, weight: float) -> HeavyPose:
+	var blend := HeavyPose.new()
+	blend.body_lean = lerpf(from.body_lean, to.body_lean, weight)
+	blend.body_lift = lerpf(from.body_lift, to.body_lift, weight)
+	blend.hammer_angle = lerp_angle(from.hammer_angle, to.hammer_angle, weight)
+	blend.right_grip = from.right_grip.lerp(to.right_grip, weight)
+	blend.left_foot = from.left_foot.lerp(to.left_foot, weight)
+	blend.right_foot = from.right_foot.lerp(to.right_foot, weight)
+	return blend
+
+static func heavy_rig_snapshot(
+	pose: String,
+	progress: float,
+	clock: float = 0.0,
+) -> Dictionary:
+	var motion := _heavy_motion(pose, progress, clock)
+	var body_center := Vector2(motion.body_lean * 0.35, -48 + motion.body_lift)
+	var shaft_direction := Vector2.from_angle(motion.hammer_angle)
+	var right_grip := body_center + motion.right_grip
+	var left_grip := right_grip - shaft_direction * 34
+	var hammer_center := right_grip + shaft_direction * 80
+	var left_shoulder := body_center + Vector2(8, -15)
+	var right_shoulder := body_center + Vector2(18, -21)
+	return {
+		"body_center": body_center,
+		"hammer_center": hammer_center,
+		"left_grip": left_grip,
+		"right_grip": right_grip,
+		"left_shoulder": left_shoulder,
+		"right_shoulder": right_shoulder,
+		"left_elbow": _two_bone_elbow(left_shoulder, left_grip, 27, 1),
+		"right_elbow": _two_bone_elbow(right_shoulder, right_grip, 27, 1),
+	}
+
+static func _ease_in(value: float) -> float:
+	var t := clampf(value, 0.0, 1.0)
+	return t * t
+
+static func _ease_in_out(value: float) -> float:
+	var t := clampf(value, 0.0, 1.0)
+	return t * t * (3.0 - 2.0 * t)
 
 static func _two_bone_elbow(
 	shoulder: Vector2,

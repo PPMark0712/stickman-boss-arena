@@ -18,6 +18,55 @@ func frames(count: int) -> void:
 		await physics_frame
 
 func run() -> void:
+	var quarry_idle: Dictionary = BoxArt.heavy_rig_snapshot("idle", 0.0)
+	var quarry_windup: Dictionary = BoxArt.heavy_rig_snapshot("windup", 1.0)
+	var quarry_impact: Dictionary = BoxArt.heavy_rig_snapshot("slam", 1.0)
+	check(
+		quarry_idle.left_grip.x > quarry_idle.right_grip.x
+		and quarry_idle.hammer_center.x < quarry_idle.right_grip.x
+		and quarry_idle.hammer_center.y < quarry_idle.right_grip.y,
+		"Quarry idle keeps the left hand on the forward handle end and hammer behind the head",
+	)
+	check(
+		quarry_windup.hammer_center.y < quarry_idle.hammer_center.y,
+		"Quarry windup raises the hammer above its idle position",
+	)
+	check(
+		quarry_impact.hammer_center.x > quarry_impact.right_grip.x
+		and quarry_impact.hammer_center.y > quarry_impact.right_grip.y,
+		"Quarry impact drives the hammer forward and down",
+	)
+	for arm in ["left", "right"]:
+		var shoulder: Vector2 = quarry_idle["%s_shoulder" % arm]
+		var elbow: Vector2 = quarry_idle["%s_elbow" % arm]
+		var grip: Vector2 = quarry_idle["%s_grip" % arm]
+		check(
+			is_equal_approx(shoulder.distance_to(elbow), 27.0)
+			and is_equal_approx(elbow.distance_to(grip), 27.0),
+			"Quarry %s arm uses equal upper and lower segments" % arm,
+		)
+	check(
+		quarry_idle.right_elbow.x > quarry_idle.right_shoulder.x
+		and quarry_idle.right_elbow.y > quarry_idle.right_grip.y,
+		"Quarry right elbow bends forward and down from the shoulder grip",
+	)
+	for heavy_pose in ["idle", "run", "windup", "slam", "attack", "air", "hurt"]:
+		for sample in [0.0, 0.5, 1.0]:
+			var snapshot: Dictionary = BoxArt.heavy_rig_snapshot(heavy_pose, sample)
+			for arm in ["left", "right"]:
+				var shoulder: Vector2 = snapshot["%s_shoulder" % arm]
+				var elbow: Vector2 = snapshot["%s_elbow" % arm]
+				var grip: Vector2 = snapshot["%s_grip" % arm]
+				check(
+					is_equal_approx(shoulder.distance_to(elbow), 27.0)
+					and is_equal_approx(elbow.distance_to(grip), 27.0),
+					"Quarry IK remains equal-length in %s at %.1f" % [heavy_pose, sample],
+				)
+	check(
+		quarry_idle.hammer_center.x < quarry_idle.right_grip.x
+		and (-quarry_idle.hammer_center.x) > (-quarry_idle.right_grip.x),
+		"Quarry hammer stays behind the head in both mirrored directions",
+	)
 	var game: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(game)
 	await frames(3)
