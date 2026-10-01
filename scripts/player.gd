@@ -11,6 +11,8 @@ class Controls extends RefCounted:
 	var jump := false
 	var jump_release := false
 	var attack := false
+	var up := false
+	var down := false
 	var dash := false
 	var focus := false
 	var focus_release := false
@@ -27,6 +29,7 @@ var coyote := 0.0
 var jump_buffer := 0.0
 var invulnerable := 0.0
 var flash := 0.0
+var attack_direction := Vector2.RIGHT
 var hit_targets: Array[int] = []
 var attack_buffer := 0.0
 var attack_queued := false
@@ -75,6 +78,8 @@ func read_controls() -> Controls:
 	live_controls.jump = Input.is_action_just_pressed("jump")
 	live_controls.jump_release = Input.is_action_just_released("jump")
 	live_controls.attack = Input.is_action_just_pressed("attack")
+	live_controls.up = Input.is_action_pressed("look_up")
+	live_controls.down = Input.is_action_pressed("look_down")
 	live_controls.dash = Input.is_action_just_pressed("dash")
 	live_controls.focus = Input.is_action_pressed("focus")
 	live_controls.focus_release = Input.is_action_just_released("focus")
@@ -239,9 +244,17 @@ func handle_attack(controls: Controls) -> void:
 		return
 	begin_sword_attack(controls)
 
-func begin_sword_attack(_controls: Controls) -> void:
+func begin_sword_attack(controls: Controls) -> void:
 	attack_variant = next_attack_variant
 	next_attack_variant = 1 - next_attack_variant
+	attack_direction = Vector2(facing, 0)
+	if not is_on_floor():
+		if controls.down:
+			attack_direction = Vector2.DOWN
+			velocity.y = maxf(velocity.y, 220.0)
+		elif controls.up:
+			attack_direction = Vector2.UP
+			velocity.y = minf(velocity.y * 0.55, -80.0)
 	velocity.x = 0
 	hit_recoil_time = 0
 	hit_targets.clear()
@@ -257,15 +270,25 @@ func finish_sword_attack(controls: Controls) -> void:
 	change_state(State.IDLE if is_on_floor() else State.AIR)
 
 func current_attack_duration() -> float:
+	if attack_direction.y != 0:
+		return ArenaConfig.AIR_ATTACK_DURATION
 	return ArenaConfig.ATTACK_DURATION
 
 func current_attack_start() -> float:
+	if attack_direction.y != 0:
+		return ArenaConfig.AIR_ATTACK_START
 	return ArenaConfig.ATTACK_START
 
 func current_attack_end() -> float:
+	if attack_direction.y != 0:
+		return ArenaConfig.AIR_ATTACK_END
 	return ArenaConfig.ATTACK_END
 
 func attack_world_direction() -> Vector2:
+	if attack_direction == Vector2.UP:
+		return Vector2.UP
+	if attack_direction == Vector2.DOWN:
+		return Vector2.DOWN
 	return Vector2(facing, 0)
 
 func handle_focus(delta: float, controls: Controls) -> void:
@@ -327,6 +350,10 @@ func cast_spell() -> bool:
 	return true
 
 func sword_rect() -> Rect2:
+	if attack_direction == Vector2.UP:
+		return Rect2(position + Vector2(-38, -153), Vector2(76, 99))
+	if attack_direction == Vector2.DOWN:
+		return Rect2(position + Vector2(-39, -22), Vector2(78, 102))
 	var x := 8.0 if facing > 0 else -ArenaConfig.ATTACK_REACH - 8.0
 	return Rect2(
 		position + Vector2(x, ArenaConfig.ATTACK_TOP),
@@ -341,7 +368,11 @@ func register_hit(target_id: int) -> bool:
 		return false
 	hit_targets.append(target_id)
 	energy = mini(energy + 1, ArenaConfig.MAX_ENERGY)
-	velocity.x = -facing * ArenaConfig.ATTACK_HIT_RECOIL
+	if attack_direction == Vector2.DOWN:
+		velocity.y = -ArenaConfig.DOWN_SLASH_BOUNCE
+		jumps_used = 1
+	else:
+		velocity.x = -facing * ArenaConfig.ATTACK_HIT_RECOIL
 	hit_recoil_time = ArenaConfig.ATTACK_HIT_RECOIL_TIME
 	stats_changed.emit()
 	return true
@@ -386,7 +417,13 @@ func _draw_fighter() -> void:
 		State.HURT, State.DEAD: pose = "hurt"
 		State.HEAL: pose = "heal"
 		State.CAST: pose = "cast"
-		State.ATTACK: pose = "attack"
+		State.ATTACK:
+			if attack_direction == Vector2.DOWN:
+				pose = "down"
+			elif attack_direction == Vector2.UP:
+				pose = "up"
+			else:
+				pose = "attack"
 	var attack_progress := state_time / current_attack_duration() if state == State.ATTACK else 0.0
 	BoxArt.player_fighter(
 		visual,
@@ -396,6 +433,7 @@ func _draw_fighter() -> void:
 		attack_progress,
 		attack_variant,
 		landing_squash,
+		not is_on_floor(),
 	)
 	visual.draw_rect(Rect2(-14, -57, 26, 4), ArenaConfig.TEAL)
 	BoxArt.bar(
@@ -410,11 +448,13 @@ func _draw_fighter() -> void:
 		and state_time >= current_attack_start()
 		and state_time <= current_attack_end()
 	):
-		var base_angle := -0.18 if attack_variant == 0 else 0.18
+		var direction := attack_world_direction()
+		if direction.x != 0:
+			direction = Vector2.RIGHT
 		var sweep := 1.0 if attack_variant == 0 else -1.0
 		for i in 5:
-			var angle := base_angle + (float(i) - 2) * 0.065 * sweep
-			var center := Vector2(0, -45) + Vector2.from_angle(angle) * 79
+			var angle := direction.angle() + (float(i) - 2) * 0.075 * sweep
+			var center := Vector2(0, -45) + Vector2.from_angle(angle) * 98
 			BoxArt.bar(
 				visual,
 				center,

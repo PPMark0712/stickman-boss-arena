@@ -30,6 +30,8 @@ func controls(values: Dictionary = {}) -> ArenaPlayer.Controls:
 	frame.jump = values.get("jump", false)
 	frame.jump_release = values.get("jump_release", false)
 	frame.attack = values.get("attack", false)
+	frame.up = values.get("up", false)
+	frame.down = values.get("down", false)
 	frame.dash = values.get("dash", false)
 	frame.focus = values.get("focus", false)
 	frame.focus_release = values.get("focus_release", false)
@@ -115,14 +117,42 @@ func run() -> void:
 	check(
 		player.state == ArenaPlayer.State.ATTACK
 		and player.velocity.x == 0
+		and player.sword_rect().size.x == ArenaConfig.ATTACK_REACH
+		and ArenaConfig.ATTACK_REACH > 100
 		and player.sword_rect().size.y == ArenaConfig.ATTACK_HEIGHT,
-		"Air attack stays horizontally still and uses the compact hitbox",
+		"Air attack stays still and uses the enlarged horizontal hitbox",
 	)
 	check(player.register_hit(123), "First sword hit registers")
 	check(not player.register_hit(123) and player.energy == 1, "One energy per target per swing")
 	check(
 		player.velocity.x == -ArenaConfig.ATTACK_HIT_RECOIL,
 		"Sword hit applies a small backward recoil",
+	)
+	player.change_state(ArenaPlayer.State.AIR)
+	player.position.y -= 100
+	player.velocity = Vector2(0, -120)
+	player.attack_buffer = 0
+	player.step(1.0 / 120, idle)
+	player.step(1.0 / 120, controls({"up": true, "attack": true}))
+	check(
+		player.attack_direction == Vector2.UP
+		and player.sword_rect().position.y < player.position.y - 100,
+		"Up plus X restores the aerial upward slash",
+	)
+	player.change_state(ArenaPlayer.State.AIR)
+	player.attack_buffer = 0
+	player.velocity = Vector2(0, -80)
+	player.step(1.0 / 120, controls({"down": true, "attack": true}))
+	check(
+		player.attack_direction == Vector2.DOWN
+		and player.sword_rect().position.y > player.position.y - 30,
+		"Down plus X restores the aerial downward slash",
+	)
+	check(
+		player.register_hit(456)
+		and player.velocity.y == -ArenaConfig.DOWN_SLASH_BOUNCE
+		and player.jumps_used == 1,
+		"Downward slash hit rebounds and restores one aerial jump",
 	)
 	player.change_state(ArenaPlayer.State.IDLE)
 	player.energy = 2

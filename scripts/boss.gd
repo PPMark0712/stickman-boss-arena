@@ -165,25 +165,30 @@ func hammer_attack() -> bool:
 					action_time = 0
 			return event_index == 2 and action_time >= 0.50
 		"combo":
-			if at(0.46, 0):
+			if at(0.62, 0):
 				slam(false, false)
-			if at(0.83, 1):
+			if at(0.78, 1):
+				face_player()
+				set_pose("windup", true)
+			if at(1.34, 2):
 				face_player()
 				slam(false, false)
-			if at(1.16, 2):
+			if at(1.50, 3):
+				set_pose("windup", true)
+			if at(1.82, 4):
 				launch(-960)
-			if event_index == 3:
+			if event_index == 5:
 				set_pose("attack")
-				if action_time < 1.9:
+				if action_time < 2.55:
 					arena.strike(Rect2(position + Vector2(-95, -150), Vector2(190, 155)), position)
 				if velocity.y > 0:
 					velocity.y += 55
-				if is_on_floor() and action_time > 1.40:
-					event_index = 4
+				if is_on_floor() and action_time > 2.06:
+					event_index = 6
 					velocity.x = 0
 					slam(true, true, true)
 					action_time = 0
-			return event_index == 4 and action_time > 0.65
+			return event_index == 6 and action_time > 0.65
 		"rain":
 			for i in 4:
 				if at(0.60 + i * 0.46, i):
@@ -336,7 +341,7 @@ func windup_duration() -> float:
 		"jump":
 			return 0.52 if phase == 1 else 0.34
 		"combo":
-			return 0.46
+			return 0.62
 		"rain":
 			return 0.60
 		"thrust":
@@ -353,7 +358,7 @@ func visual_progress() -> float:
 	if action.is_empty():
 		return 0.0
 	if pose == "windup":
-		return clampf(action_time / windup_duration(), 0.0, 1.0)
+		return clampf(pose_time / windup_duration(), 0.0, 1.0)
 	if kind == 0 and pose == "slam":
 		return clampf(pose_time / 0.18, 0.0, 1.0)
 	if pose == "attack" and action == "combo":
@@ -375,10 +380,20 @@ func _draw_fighter() -> void:
 		tint.a = 0.2
 	if phase_pending:
 		tint = tint.lerp(Color.WHITE, (sin(clock * 24) + 1) * 0.4)
-	BoxArt.fighter(visual, pose, clock, tint, kind == 0, visual_progress(), visual_variant())
+	BoxArt.fighter(
+		visual,
+		pose,
+		clock,
+		tint,
+		kind == 0,
+		visual_progress(),
+		visual_variant(),
+		0.0,
+		facing > 0,
+	)
 	if kind == 1:
 		BoxArt.bar(visual, Vector2(-6, -58), Vector2(-31, -16), 5, tint.darkened(0.3))
-	if action == "combo" and event_index == 3:
+	if action == "combo" and event_index == 5:
 		for i in 6:
 			var point := Vector2(0, -42) + Vector2.from_angle(clock * 19 + i * TAU / 6) * 67
 			BoxArt.bar(visual, point, point + Vector2(9, 9), 4, tint)

@@ -299,7 +299,7 @@ func draw_effects() -> void:
 		var alpha: float = slash.life / slash.max_life
 		var base_angle: float = slash.direction.angle()
 		var sweep := -1.0 if slash.variant == 1 else 1.0
-		var reach := 90.0
+		var reach := 116.0
 		for i in 6:
 			var phase := float(i) / 5.0
 			var angle := base_angle + lerpf(-0.22, 0.22, phase) * sweep
@@ -308,17 +308,9 @@ func draw_effects() -> void:
 			var tint: Color = slash.color
 			tint.a = alpha * (0.18 + phase * 0.10)
 			BoxArt.bar(effects, start, finish, 2.0 + alpha * 2.0, tint)
-	# Ground markers indicate the region of an impending attack.
+	# Falling hazards and the Prism keep explicit targeting cues. The Quarry
+	# communicates its first hit through the raised hammer silhouette instead.
 	if combat_active and not boss.dead:
-		if boss.pose == "windup" and boss.kind == 0 and not boss.action.is_empty():
-			var width := 205.0 if boss.action == "combo" else 155.0
-			var x: float = boss.position.x + (0 if boss.facing > 0 else -width)
-			if boss.action == "jump" and not boss.is_on_floor():
-				x = boss.target_x - width * 0.5
-			effects.draw_rect(Rect2(x, 590, width, 3), Color(ArenaConfig.DANGER, 0.24))
-			var fill: float = width * boss.visual_progress()
-			var fill_x: float = x if boss.facing > 0 else x + width - fill
-			effects.draw_rect(Rect2(fill_x, 589, fill, 5), Color(ArenaConfig.DANGER, 0.72))
 		if boss.pose == "windup" and boss.kind == 1 and not boss.action.is_empty():
 			var pulse := 0.48 + sin(boss.clock * 18) * 0.14
 			var origin := boss.position + Vector2(boss.facing * 34, -58)

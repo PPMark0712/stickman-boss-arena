@@ -18,11 +18,15 @@ const ATTACK_BUFFER := 0.16
 const ATTACK_DURATION := 0.27
 const ATTACK_START := 0.055
 const ATTACK_END := 0.165
-const ATTACK_REACH := 100.0
-const ATTACK_HEIGHT := 42.0
-const ATTACK_TOP := -66.0
+const ATTACK_REACH := 126.0
+const ATTACK_HEIGHT := 48.0
+const ATTACK_TOP := -69.0
+const AIR_ATTACK_DURATION := 0.29
+const AIR_ATTACK_START := 0.05
+const AIR_ATTACK_END := 0.19
 const ATTACK_HIT_RECOIL := 105.0
 const ATTACK_HIT_RECOIL_TIME := 0.075
+const DOWN_SLASH_BOUNCE := 610.0
 const DASH_SPEED := 790.0
 const DASH_DURATION := 0.14
 const DASH_COOLDOWN := 0.42
@@ -48,6 +52,8 @@ static func install_input() -> void:
 	var actions := {
 		"move_left": [KEY_LEFT],
 		"move_right": [KEY_RIGHT],
+		"look_up": [KEY_UP],
+		"look_down": [KEY_DOWN],
 		"jump": [KEY_Z],
 		"attack": [KEY_X],
 		"dash": [KEY_C],
