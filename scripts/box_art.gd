@@ -23,6 +23,168 @@ static func outline(canvas: CanvasItem, rect: Rect2, color: Color, width: float 
 	)
 	canvas.draw_rect(right, color)
 
+static func player_fighter(
+	canvas: CanvasItem,
+	pose: String,
+	clock: float,
+	color: Color,
+	progress: float = 0.0,
+	variant: int = 0,
+	squash: float = 0.0,
+) -> void:
+	progress = clampf(progress, 0.0, 1.0)
+	squash = clampf(squash, 0.0, 1.0)
+	var gait := clock * 14.0
+	var stride := sin(gait) if pose == "run" else 0.0
+	var bounce := absf(cos(gait)) * 1.7 if pose == "run" else sin(clock * 3.2) * 0.7
+	var lean := 0.0
+	match pose:
+		"run": lean = 5.0
+		"air": lean = 3.0
+		"attack": lean = lerpf(-4.0, 8.0, _ease_segment(progress, 0.16, 0.56))
+		"dash": lean = 18.0
+		"cast": lean = 7.0
+		"heal": lean = -4.0
+		"hurt": lean = -13.0
+
+	var hip := Vector2(lean * 0.22, -26 + bounce + squash * 6)
+	var chest := Vector2(lean, -51 + bounce + squash * 9)
+	var head_center := Vector2(lean + 1, -67 + bounce + squash * 11)
+	if pose == "dash":
+		hip += Vector2(-5, 1)
+		chest += Vector2(2, 5)
+		head_center += Vector2(5, 7)
+
+	var left_foot := Vector2(-12 + stride * 14, -2 - maxf(0, cos(gait)) * 5)
+	var right_foot := Vector2(12 - stride * 14, -2 - maxf(0, -cos(gait)) * 5)
+	if pose == "air":
+		left_foot = Vector2(-15, -13)
+		right_foot = Vector2(17, -8)
+	elif pose == "dash":
+		left_foot = Vector2(-24, -5)
+		right_foot = Vector2(5, -2)
+	elif pose == "attack":
+		left_foot = Vector2(-17, -2)
+		right_foot = Vector2(19, -2)
+	elif pose == "hurt":
+		left_foot = Vector2(-19, -2)
+		right_foot = Vector2(10, -3)
+	if squash > 0:
+		left_foot.x -= squash * 5
+		right_foot.x += squash * 5
+	var left_knee := hip.lerp(left_foot, 0.52) + Vector2(-5, 0)
+	var right_knee := hip.lerp(right_foot, 0.52) + Vector2(5, 0)
+
+	var rear_shoulder := chest + Vector2(-3, 3)
+	var front_shoulder := chest + Vector2(3, 3)
+	var rear_elbow := Vector2(-12 - stride * 6, -39)
+	var rear_hand := Vector2(-18 - stride * 10, -29)
+	var front_elbow := Vector2(10 + stride * 6, -38)
+	var front_hand := Vector2(17 + stride * 10, -29)
+	var sword_angle := -0.62
+
+	match pose:
+		"attack":
+			var strike := _ease_segment(progress, 0.16, 0.55)
+			var recover := _ease_segment(progress, 0.68, 1.0)
+			var strike_y := -4.0 if variant == 0 else 7.0
+			front_hand = chest + Vector2(lerpf(-3, 31, strike), lerpf(8, strike_y, strike))
+			front_hand = front_hand.lerp(chest + Vector2(17, 10), recover)
+			front_elbow = front_shoulder.lerp(front_hand, 0.54)
+			front_elbow += Vector2(2, -6 if variant == 0 else 6)
+			rear_elbow = rear_shoulder + Vector2(-11, 8)
+			rear_hand = rear_elbow + Vector2(-10, 9)
+			sword_angle = _player_sword_angle(progress, variant)
+		"air":
+			rear_elbow = rear_shoulder + Vector2(-12, 5)
+			rear_hand = rear_elbow + Vector2(-8, 10)
+			front_elbow = front_shoulder + Vector2(10, 6)
+			front_hand = front_elbow + Vector2(8, 9)
+			sword_angle = -0.42
+		"dash":
+			rear_elbow = rear_shoulder + Vector2(-15, 1)
+			rear_hand = rear_elbow + Vector2(-13, 4)
+			front_elbow = front_shoulder + Vector2(-12, 7)
+			front_hand = front_elbow + Vector2(-12, 5)
+			sword_angle = -2.88
+		"cast":
+			front_elbow = front_shoulder + Vector2(14, -2)
+			front_hand = front_elbow + Vector2(13, 0)
+			sword_angle = -0.08
+		"heal":
+			rear_elbow = rear_shoulder + Vector2(-8, 8)
+			rear_hand = Vector2(1, -38)
+			front_elbow = front_shoulder + Vector2(9, 8)
+			front_hand = Vector2(6, -38)
+		"hurt":
+			rear_elbow = rear_shoulder + Vector2(-13, -2)
+			rear_hand = rear_elbow + Vector2(-9, -5)
+			front_elbow = front_shoulder + Vector2(8, 11)
+			front_hand = front_elbow + Vector2(7, 8)
+			sword_angle = 0.75
+
+	_limb(canvas, hip + Vector2(-3, 0), left_knee, left_foot, 5, Color(color, color.a * 0.78))
+	_limb(canvas, hip + Vector2(3, 0), right_knee, right_foot, 5, color)
+	_limb(canvas, rear_shoulder, rear_elbow, rear_hand, 4, Color(color, color.a * 0.68))
+	bar(canvas, chest, hip, 6, color)
+	var head := Rect2(head_center - Vector2(10, 10), Vector2(20, 20))
+	canvas.draw_rect(head, Color("#101c27"))
+	outline(canvas, head, color, 3)
+	canvas.draw_rect(Rect2(head_center + Vector2(4, -3), Vector2(9, 3)), color)
+	_limb(canvas, front_shoulder, front_elbow, front_hand, 4, color)
+	if pose != "heal":
+		_draw_player_sword(canvas, pose, color, front_hand, sword_angle, progress, variant)
+
+static func _limb(
+	canvas: CanvasItem,
+	root: Vector2,
+	joint: Vector2,
+	end: Vector2,
+	width: float,
+	color: Color,
+) -> void:
+	bar(canvas, root, joint, width, color)
+	bar(canvas, joint, end, width, color)
+
+static func _ease_segment(value: float, start: float, finish: float) -> float:
+	var t := clampf((value - start) / maxf(finish - start, 0.001), 0.0, 1.0)
+	return t * t * (3.0 - 2.0 * t)
+
+static func _player_sword_angle(progress: float, variant: int) -> float:
+	var windup := -0.78 if variant == 0 else 0.78
+	var finish := 0.30 if variant == 0 else -0.30
+	if progress < 0.16:
+		return lerp_angle(-0.62, windup, _ease_segment(progress, 0.0, 0.16))
+	if progress < 0.62:
+		return lerp_angle(windup, finish, _ease_segment(progress, 0.16, 0.62))
+	return lerp_angle(finish, -0.62, _ease_segment(progress, 0.62, 1.0))
+
+static func _draw_player_sword(
+	canvas: CanvasItem,
+	pose: String,
+	color: Color,
+	hand: Vector2,
+	angle: float,
+	progress: float,
+	variant: int,
+) -> void:
+	if pose == "attack":
+		for i in range(3, 0, -1):
+			var old_progress := maxf(0.0, progress - i * 0.035)
+			var old_angle := _player_sword_angle(old_progress, variant)
+			var old_tip := hand + Vector2.from_angle(old_angle) * 50
+			bar(
+				canvas,
+				hand,
+				old_tip,
+				5.0 - i,
+				Color(ArenaConfig.TEAL, 0.08 + (3 - i) * 0.08),
+			)
+	var tip := hand + Vector2.from_angle(angle) * 50
+	bar(canvas, hand, tip, 4, color)
+	var normal := Vector2.from_angle(angle + PI * 0.5)
+	bar(canvas, hand - normal * 7, hand + normal * 7, 4, ArenaConfig.AMBER)
+
 static func fighter(
 	canvas: CanvasItem,
 	pose: String,
@@ -33,6 +195,9 @@ static func fighter(
 	variant: int = 0,
 	squash: float = 0.0,
 ) -> void:
+	if heavy:
+		_draw_heavy_fighter(canvas, pose, clock, color, progress, squash)
+		return
 	progress = clampf(progress, 0.0, 1.0)
 	squash = clampf(squash, 0.0, 1.0)
 	var stride := sin(clock * 16.0) * (13.0 if pose == "run" else 1.5)
@@ -88,10 +253,7 @@ static func fighter(
 	outline(canvas, head, color, 3)
 	canvas.draw_rect(Rect2(head_center + Vector2(4, -3), Vector2(9, 3)), color)
 
-	if heavy:
-		_draw_hammer(canvas, pose, clock, color, shoulder, lean, progress)
-	else:
-		_draw_sword(canvas, pose, color, shoulder, progress, variant)
+	_draw_sword(canvas, pose, color, shoulder, progress, variant)
 
 static func _swing_curve(progress: float) -> float:
 	var value := clampf((progress - 0.08) / 0.52, 0.0, 1.0)
@@ -151,29 +313,90 @@ static func _draw_sword(
 	var normal := Vector2.from_angle(angle + PI * 0.5)
 	bar(canvas, hand - normal * 7, hand + normal * 7, 4, ArenaConfig.AMBER)
 
-static func _draw_hammer(
+static func _draw_heavy_fighter(
 	canvas: CanvasItem,
 	pose: String,
 	clock: float,
 	color: Color,
-	shoulder: Vector2,
-	lean: float,
 	progress: float,
+	squash: float,
 ) -> void:
-	outline(canvas, Rect2(lean - 19, shoulder.y - 4, 38, 15), color, 3)
-	var angle := -0.85
+	progress = clampf(progress, 0.0, 1.0)
+	var gait := clock * 8.5
+	var stride := sin(gait) * (8.0 if pose == "run" else 0.0)
+	var bounce := absf(cos(gait)) * 1.2 if pose == "run" else sin(clock * 2.4) * 0.45
+	var lean := 0.0
 	if pose == "windup":
-		var anticipation := clampf(progress * 1.7, 0.0, 1.0)
-		angle = lerp_angle(-0.85, -2.12, anticipation) + sin(clock * 4.0) * 0.035
+		lean = lerpf(0.0, -7.0, _ease_segment(progress, 0.0, 0.72))
 	elif pose == "slam":
-		angle = lerp_angle(-2.12, 0.20, _swing_curve(progress))
+		lean = lerpf(-5.0, 11.0, _ease_segment(progress, 0.0, 0.72))
 	elif pose == "attack":
-		angle = progress * TAU * 1.8
-	var hand := shoulder + Vector2.from_angle(angle) * 36
-	var tip := hand + Vector2.from_angle(angle) * 39
-	bar(canvas, shoulder, hand, 5, color)
-	bar(canvas, hand, tip, 6, color)
-	canvas.draw_set_transform(tip, angle)
-	canvas.draw_rect(Rect2(-19, -13, 38, 26), Color("#27303a"))
-	outline(canvas, Rect2(-19, -13, 38, 26), color, 3)
+		lean = sin(progress * TAU) * 7.0
+	elif pose == "air":
+		lean = 4.0
+	elif pose == "hurt":
+		lean = -10.0
+
+	var body_center := Vector2(lean * 0.35, -48 + bounce + squash * 5)
+	var body_rect := Rect2(body_center - Vector2(23, 28), Vector2(46, 56))
+	var left_hip := body_center + Vector2(-12, 27)
+	var right_hip := body_center + Vector2(12, 27)
+	var left_foot := Vector2(-17 - stride, -2)
+	var right_foot := Vector2(17 + stride, -2)
+	if pose == "air":
+		left_foot = Vector2(-21, -10)
+		right_foot = Vector2(20, -7)
+	elif pose == "slam":
+		left_foot = Vector2(-23, -2)
+		right_foot = Vector2(24, -2)
+	var left_knee := left_hip.lerp(left_foot, 0.52) + Vector2(-5, 1)
+	var right_knee := right_hip.lerp(right_foot, 0.52) + Vector2(5, 1)
+	_limb(canvas, left_hip, left_knee, left_foot, 8, Color(color, color.a * 0.78))
+	_limb(canvas, right_hip, right_knee, right_foot, 8, color)
+
+	var angle := -0.72
+	if pose == "run":
+		angle += sin(gait) * 0.08
+	elif pose == "windup":
+		angle = lerp_angle(-0.72, -2.18, _ease_segment(progress, 0.0, 0.82))
+	elif pose == "slam":
+		angle = lerp_angle(-2.18, 0.38, _ease_segment(progress, 0.0, 0.72))
+	elif pose == "attack":
+		angle = -0.9 + progress * TAU * 1.8
+	elif pose == "air":
+		angle = -1.05
+	elif pose == "hurt":
+		angle = 0.35
+
+	var shaft_direction := Vector2.from_angle(angle)
+	var grip_center := body_center + Vector2(5, -5)
+	if pose == "windup":
+		grip_center += Vector2(-3, -5)
+	elif pose == "slam":
+		grip_center += Vector2(8, 8)
+	var rear_grip := grip_center - shaft_direction * 10
+	var front_grip := grip_center + shaft_direction * 14
+	var shaft_start := grip_center - shaft_direction * 27
+	var hammer_center := grip_center + shaft_direction * 70
+	bar(canvas, shaft_start, hammer_center, 7, color.darkened(0.12))
+	canvas.draw_set_transform(hammer_center, angle)
+	canvas.draw_rect(Rect2(-22, -15, 44, 30), Color("#27303a"))
+	outline(canvas, Rect2(-22, -15, 44, 30), color, 4)
 	canvas.draw_set_transform(Vector2.ZERO)
+
+	canvas.draw_rect(body_rect, Color("#202a33"))
+	outline(canvas, body_rect, color, 4)
+	var head_center := body_center + Vector2(lean * 0.12, -42)
+	var head := Rect2(head_center - Vector2(12, 11), Vector2(24, 22))
+	canvas.draw_rect(head, Color("#101c27"))
+	outline(canvas, head, color, 4)
+	canvas.draw_rect(Rect2(head_center + Vector2(3, -3), Vector2(10, 4)), color)
+
+	var rear_shoulder := body_center + Vector2(-20, -17)
+	var front_shoulder := body_center + Vector2(20, -14)
+	var rear_elbow := rear_shoulder.lerp(rear_grip, 0.52) + Vector2(-9, -3)
+	var front_elbow := front_shoulder.lerp(front_grip, 0.52) + Vector2(9, 4)
+	_limb(canvas, rear_shoulder, rear_elbow, rear_grip, 7, Color(color, color.a * 0.78))
+	_limb(canvas, front_shoulder, front_elbow, front_grip, 7, color)
+	canvas.draw_rect(Rect2(rear_grip - Vector2(4, 4), Vector2(8, 8)), color)
+	canvas.draw_rect(Rect2(front_grip - Vector2(4, 4), Vector2(8, 8)), color)

@@ -5,30 +5,27 @@ extends RefCounted
 const FLOOR_Y := 594.0
 const LEFT_WALL := 48.0
 const RIGHT_WALL := 1232.0
-const GRAVITY := 1900.0
-const FALL_GRAVITY := 2450.0
-const MAX_FALL := 1100.0
+const PLAYER_GRAVITY := 2200.0
+const PLAYER_FALL_GRAVITY := 2850.0
+const BOSS_GRAVITY := 1900.0
+const MAX_FALL := 1200.0
 const RUN_SPEED := 350.0
-const ACCELERATION := 3500.0
-const FRICTION := 4300.0
-const AIR_ACCELERATION := 2200.0
 const JUMP_SPEED := 710.0
 const DOUBLE_JUMP_SPEED := 635.0
 const COYOTE_TIME := 0.11
 const JUMP_BUFFER := 0.14
 const ATTACK_BUFFER := 0.16
-const COMBO_GRACE := 0.30
-const ATTACK_DURATIONS := [0.25, 0.27, 0.34]
-const ATTACK_STARTS := [0.045, 0.055, 0.075]
-const ATTACK_ENDS := [0.145, 0.165, 0.225]
-const COMBO_LUNGES := [105.0, 135.0, 190.0]
-const COMBO_REACHES := [96.0, 104.0, 122.0]
-const COMBO_HEIGHTS := [64.0, 82.0, 54.0]
-const COMBO_TOPS := [-72.0, -91.0, -66.0]
-const GROUND_HIT_RECOILS := [48.0, 34.0, 18.0]
-const AIR_ATTACK_DURATION := 0.29
-const AIR_ATTACK_START := 0.05
-const AIR_ATTACK_END := 0.19
+const ATTACK_DURATION := 0.27
+const ATTACK_START := 0.055
+const ATTACK_END := 0.165
+const ATTACK_REACH := 100.0
+const ATTACK_HEIGHT := 42.0
+const ATTACK_TOP := -66.0
+const ATTACK_HIT_RECOIL := 105.0
+const ATTACK_HIT_RECOIL_TIME := 0.075
+const DASH_SPEED := 790.0
+const DASH_DURATION := 0.14
+const DASH_COOLDOWN := 0.42
 const HITSTOP_SCALE := 0.12
 const SWORD_DAMAGE := 10
 const SPELL_DAMAGE := 24
@@ -51,10 +48,9 @@ static func install_input() -> void:
 	var actions := {
 		"move_left": [KEY_LEFT],
 		"move_right": [KEY_RIGHT],
-		"look_up": [KEY_UP],
-		"look_down": [KEY_DOWN],
 		"jump": [KEY_Z],
 		"attack": [KEY_X],
+		"dash": [KEY_C],
 		"focus": [KEY_A],
 		"pause": [KEY_ESCAPE],
 		"retry": [KEY_R],

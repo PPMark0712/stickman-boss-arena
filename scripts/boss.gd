@@ -27,6 +27,7 @@ var event_index := 0
 var action_count := 0
 var target_x := 0.0
 var pose := "idle"
+var pose_time := 0.0
 var dead := false
 var tree: ArenaBT.Selector
 var visual: Node2D
@@ -62,10 +63,11 @@ func _physics_process(delta: float) -> void:
 	if not arena.combat_active or dead:
 		return
 	clock += delta
+	pose_time += delta
 	flash = maxf(0, flash - delta)
 	cooldown = maxf(0, cooldown - delta)
 	if not is_on_floor():
-		velocity.y = minf(velocity.y + ArenaConfig.GRAVITY * delta, 1400)
+		velocity.y = minf(velocity.y + ArenaConfig.BOSS_GRAVITY * delta, 1400)
 	tree.tick(delta)
 	move_and_slide()
 	position.x = clampf(position.x, ArenaConfig.LEFT_WALL + 35, ArenaConfig.RIGHT_WALL - 35)
@@ -83,8 +85,9 @@ func _phase_transition(delta: float) -> ArenaBT.Status:
 		arena.sound("phase")
 		arena.notify("裂岩守卫 · 狂震" if kind == 0 else "折光剑使 · 镜裂", 2.2)
 		phase_changed.emit()
+		set_pose("windup", true)
 	phase_time += delta
-	pose = "windup"
+	set_pose("windup")
 	if phase_time < 1.2:
 		return ArenaBT.Status.RUNNING
 	phase_pending = false
@@ -101,7 +104,7 @@ func _pursue(_delta: float) -> ArenaBT.Status:
 		speed *= 1.2
 	# Deliberate small retreats during recovery create a readable rhythm.
 	velocity.x = facing * speed if absf(distance) > desired else -facing * speed * 0.28
-	pose = "run"
+	set_pose("run")
 	return ArenaBT.Status.RUNNING
 
 func choose_attack() -> String:
@@ -121,7 +124,7 @@ func begin_attack(name_: String) -> void:
 	if absf(target_x - position.x) > 1:
 		facing = signf(target_x - position.x)
 	velocity.x = 0
-	pose = "windup"
+	set_pose("windup")
 
 func _perform_attack(delta: float) -> ArenaBT.Status:
 	if action.is_empty():
@@ -132,7 +135,7 @@ func _perform_attack(delta: float) -> ArenaBT.Status:
 		return ArenaBT.Status.RUNNING
 	action = ""
 	velocity.x = 0
-	pose = "idle"
+	set_pose("idle")
 	cooldown = attack_cooldown()
 	return ArenaBT.Status.SUCCESS
 
@@ -152,7 +155,7 @@ func hammer_attack() -> bool:
 			if at(windup_duration(), 0):
 				launch(-810 if phase == 1 else -900)
 			if event_index == 1:
-				pose = "windup"
+				set_pose("windup")
 				if velocity.y > 50:
 					velocity.y += 45
 				if is_on_floor() and action_time > 0.65:
@@ -170,7 +173,7 @@ func hammer_attack() -> bool:
 			if at(1.16, 2):
 				launch(-960)
 			if event_index == 3:
-				pose = "attack"
+				set_pose("attack")
 				if action_time < 1.9:
 					arena.strike(Rect2(position + Vector2(-95, -150), Vector2(190, 155)), position)
 				if velocity.y > 0:
@@ -195,7 +198,7 @@ func mirror_attack() -> bool:
 	match action:
 		"thrust":
 			if at(windup_duration(), 0):
-				pose = "attack"
+				set_pose("attack")
 				velocity.x = facing * 860
 				arena.sound("swing")
 			if event_index == 1:
@@ -207,11 +210,11 @@ func mirror_attack() -> bool:
 				if action_time >= (0.9 if phase == 1 else 0.76):
 					velocity.x = 0
 					event_index = 2
-					pose = "windup"
+					set_pose("windup")
 			if phase == 2 and at(1.14, 2):
 				face_player()
 				velocity.x = facing * 900
-				pose = "attack"
+				set_pose("attack")
 			if event_index == 3:
 				var return_hit := Rect2(
 					position + Vector2(-12 if facing > 0 else -117, -78),
@@ -223,7 +226,7 @@ func mirror_attack() -> bool:
 			return action_time >= (1.30 if phase == 1 else 1.82)
 		"boomerang", "fan":
 			if at(0.65, 0):
-				pose = "attack"
+				set_pose("attack")
 				arena.spawn_blade(position + Vector2(facing * 48, -53), Vector2(facing * 380, 0), true)
 				if action == "fan":
 					arena.spawn_blade(position + Vector2(0, -75), Vector2(facing * 340, -145), false)
@@ -240,12 +243,12 @@ func mirror_attack() -> bool:
 				action_time = 0
 			if event_index == 2:
 				velocity = Vector2.ZERO
-				pose = "down"
+				set_pose("down")
 				if action_time > 0.38:
 					event_index = 3
 					velocity = Vector2((target_x - position.x) * 3.2, 1100)
 			if event_index == 3:
-				pose = "down"
+				set_pose("down")
 				if is_on_floor():
 					event_index = 4
 					velocity.x = 0
@@ -268,15 +271,21 @@ func mirror_attack() -> bool:
 func launch(upward: float) -> void:
 	target_x = clampf(arena.player.position.x, 115, 1165)
 	velocity = Vector2(clampf((target_x - position.x) * 1.25, -440, 440), upward)
-	pose = "air"
+	set_pose("air")
 	arena.burst(position, color(), 10)
 
 func face_player() -> void:
 	if absf(arena.player.position.x - position.x) > 1:
 		facing = signf(arena.player.position.x - position.x)
 
+func set_pose(next_pose: String, restart: bool = false) -> void:
+	if pose == next_pose and not restart:
+		return
+	pose = next_pose
+	pose_time = 0
+
 func slam(both: bool, wave: bool, wide: bool = false) -> void:
-	pose = "slam"
+	set_pose("slam", true)
 	var width := 205.0 if wide else 155.0
 	var origin := position + Vector2(0 if facing > 0 else -width, -95)
 	arena.strike(Rect2(origin, Vector2(width, 95)), position)
@@ -307,7 +316,7 @@ func take_damage(amount: int, from: Vector2) -> bool:
 	health_changed.emit()
 	if health == 0:
 		dead = true
-		pose = "hurt"
+		set_pose("hurt")
 		arena.burst(position + Vector2(0, -65), color(), 65)
 		defeated.emit()
 	return true
@@ -345,6 +354,8 @@ func visual_progress() -> float:
 		return 0.0
 	if pose == "windup":
 		return clampf(action_time / windup_duration(), 0.0, 1.0)
+	if kind == 0 and pose == "slam":
+		return clampf(pose_time / 0.18, 0.0, 1.0)
 	if pose == "attack" and action == "combo":
 		return fmod(action_time * 1.8, 1.0)
 	if pose == "attack" or pose == "slam" or pose == "down":

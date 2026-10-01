@@ -28,7 +28,21 @@ func run() -> void:
 		await frames(4)
 		var room: ArenaRoom = game.room
 		room.player.controlled = false
+		room.player.invulnerable = 0
+		room.player.position = Vector2(800, ArenaConfig.FLOOR_Y)
+		room.boss.position = Vector2(845, ArenaConfig.FLOOR_Y)
+		room.boss.cooldown = 1000
+		room.player.facing = 1
+		room.player.begin_dash(ArenaPlayer.Controls.new())
+		await frames(3)
+		check(room.player.state == ArenaPlayer.State.HURT, "Boss contact interrupts dash")
+		room.restore_time_scale()
+		room.player.change_state(ArenaPlayer.State.IDLE)
+		room.player.position = Vector2(290, ArenaConfig.FLOOR_Y)
+		room.player.velocity = Vector2.ZERO
+		room.boss.position = Vector2(945, ArenaConfig.FLOOR_Y)
 		room.player.invulnerable = 1000
+		await frames(2)
 		check(room.player.is_on_floor(), "Player grounded at fight start")
 		check(room.boss.health == room.boss.max_health, "Boss starts at full health")
 		room.spawn_wave(Vector2(640, ArenaConfig.FLOOR_Y), 1, room.boss.color())
@@ -83,7 +97,7 @@ func run() -> void:
 		room.boss.position = Vector2(600, ArenaConfig.FLOOR_Y)
 		room.player.position = Vector2(535, ArenaConfig.FLOOR_Y)
 		room.player.facing = 1
-		room.player.attack_direction = Vector2.RIGHT
+		room.player.attack_variant = 0
 		room.player.hit_targets.clear()
 		room.player.energy = 0
 		room.player.stats_changed.emit()

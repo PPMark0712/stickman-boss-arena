@@ -4,15 +4,14 @@ extends CharacterBody2D
 signal stats_changed
 signal died
 
-enum State { IDLE, RUN, AIR, ATTACK, CAST, HEAL, HURT, DEAD }
+enum State { IDLE, RUN, AIR, ATTACK, DASH, CAST, HEAL, HURT, DEAD }
 
 class Controls extends RefCounted:
 	var axis := 0.0
 	var jump := false
 	var jump_release := false
 	var attack := false
-	var up := false
-	var down := false
+	var dash := false
 	var focus := false
 	var focus_release := false
 
@@ -28,14 +27,14 @@ var coyote := 0.0
 var jump_buffer := 0.0
 var invulnerable := 0.0
 var flash := 0.0
-var attack_direction := Vector2.RIGHT
 var hit_targets: Array[int] = []
 var attack_buffer := 0.0
 var attack_queued := false
-var combo_step := 0
-var combo_grace := 0.0
+var attack_variant := 0
+var next_attack_variant := 0
 var slash_emitted := false
-var attack_is_air := false
+var hit_recoil_time := 0.0
+var dash_cooldown := 0.0
 var focus_time := 0.0
 var focus_consumed := false
 var focus_cancelled := false
@@ -76,8 +75,7 @@ func read_controls() -> Controls:
 	live_controls.jump = Input.is_action_just_pressed("jump")
 	live_controls.jump_release = Input.is_action_just_released("jump")
 	live_controls.attack = Input.is_action_just_pressed("attack")
-	live_controls.up = Input.is_action_pressed("look_up")
-	live_controls.down = Input.is_action_pressed("look_down")
+	live_controls.dash = Input.is_action_just_pressed("dash")
 	live_controls.focus = Input.is_action_pressed("focus")
 	live_controls.focus_release = Input.is_action_just_released("focus")
 	return live_controls
@@ -89,11 +87,10 @@ func step(delta: float, controls: Controls) -> void:
 	flash = maxf(0, flash - delta)
 	jump_buffer = maxf(0, jump_buffer - delta)
 	attack_buffer = maxf(0, attack_buffer - delta)
-	combo_grace = maxf(0, combo_grace - delta)
+	hit_recoil_time = maxf(0, hit_recoil_time - delta)
+	dash_cooldown = maxf(0, dash_cooldown - delta)
 	landing_squash = maxf(0, landing_squash - delta * 5.5)
 	turn_dust_cooldown = maxf(0, turn_dust_cooldown - delta)
-	if combo_grace <= 0 and state != State.ATTACK:
-		combo_step = 0
 	coyote = ArenaConfig.COYOTE_TIME if is_on_floor() else maxf(0, coyote - delta)
 	if is_on_floor():
 		jumps_used = 0
@@ -103,8 +100,14 @@ func step(delta: float, controls: Controls) -> void:
 		attack_buffer = ArenaConfig.ATTACK_BUFFER
 		if state == State.ATTACK:
 			attack_queued = true
-	if not is_on_floor():
-		var gravity := ArenaConfig.FALL_GRAVITY if velocity.y > 0 else ArenaConfig.GRAVITY
+	if controls.dash:
+		begin_dash(controls)
+	if not is_on_floor() and state != State.DASH:
+		var gravity := (
+			ArenaConfig.PLAYER_FALL_GRAVITY
+			if velocity.y > 0
+			else ArenaConfig.PLAYER_GRAVITY
+		)
 		velocity.y = minf(velocity.y + gravity * delta, ArenaConfig.MAX_FALL)
 	if state == State.DEAD:
 		velocity.x = move_toward(velocity.x, 0, 800 * delta)
@@ -119,6 +122,11 @@ func step(delta: float, controls: Controls) -> void:
 		velocity.x = move_toward(velocity.x, 0, 1100 * delta)
 		if state_time >= 0.24:
 			change_state(State.IDLE if is_on_floor() else State.AIR)
+	elif state == State.DASH:
+		velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
+		if state_time >= ArenaConfig.DASH_DURATION:
+			velocity.x = 0
+			change_state(State.IDLE if is_on_floor() else State.AIR)
 	else:
 		handle_focus(delta, controls)
 		handle_movement(delta, controls)
@@ -126,8 +134,12 @@ func step(delta: float, controls: Controls) -> void:
 		if state == State.ATTACK:
 			if not slash_emitted and state_time >= current_attack_start():
 				slash_emitted = true
-				arena.show_slash(position + Vector2(0, -43), attack_world_direction(), combo_step)
-				arena.sound("swing%d" % mini(combo_step + 1, 3))
+				arena.show_slash(
+					position + Vector2(0, -45),
+					attack_world_direction(),
+					attack_variant,
+				)
+				arena.sound("swing%d" % (attack_variant + 1))
 			if state_time >= current_attack_start() and state_time <= current_attack_end():
 				arena.resolve_sword(self, sword_rect())
 			if state_time >= current_attack_duration():
@@ -153,20 +165,19 @@ func step(delta: float, controls: Controls) -> void:
 	visual.scale.x = facing
 	visual.queue_redraw()
 
-func handle_movement(delta: float, controls: Controls) -> void:
+func handle_movement(_delta: float, controls: Controls) -> void:
 	var axis := controls.axis
 	if state == State.HEAL:
-		velocity.x = move_toward(velocity.x, 0, ArenaConfig.FRICTION * delta)
+		velocity.x = 0
 		if absf(axis) > 0.1 or controls.jump or controls.attack:
 			focus_cancelled = true
 			change_state(State.IDLE)
 		else:
 			return
-	if state == State.CAST:
-		axis *= 0.35
-	elif state == State.ATTACK:
-		axis *= 0.38 if is_on_floor() else 0.62
-	if axis != 0 and state != State.ATTACK:
+	if state == State.ATTACK:
+		if hit_recoil_time <= 0:
+			velocity.x = 0
+	elif axis != 0:
 		if (
 			is_on_floor()
 			and signf(axis) != facing
@@ -177,12 +188,9 @@ func handle_movement(delta: float, controls: Controls) -> void:
 			turn_dust_cooldown = 0.18
 			landing_squash = maxf(landing_squash, 0.22)
 		facing = signf(axis)
-	var acceleration := ArenaConfig.ACCELERATION if is_on_floor() else ArenaConfig.AIR_ACCELERATION
-	if state == State.ATTACK:
-		acceleration *= 0.58
-	if axis == 0:
-		acceleration = ArenaConfig.FRICTION * (0.22 if state == State.ATTACK else 1.0)
-	velocity.x = move_toward(velocity.x, axis * ArenaConfig.RUN_SPEED, acceleration * delta)
+		velocity.x = axis * ArenaConfig.RUN_SPEED
+	else:
+		velocity.x = 0
 	if jump_buffer > 0 and (is_on_floor() or coyote > 0 or jumps_used < 2):
 		# Walking off an edge consumes the ground jump after the coyote window.
 		if not is_on_floor() and coyote <= 0:
@@ -195,13 +203,28 @@ func handle_movement(delta: float, controls: Controls) -> void:
 			change_state(State.AIR)
 		elif state_time >= current_attack_end():
 			attack_queued = false
-			combo_step = 0
-			combo_grace = 0
 			change_state(State.AIR)
 		arena.burst(position, ArenaConfig.TEAL, 7)
 		arena.sound("jump")
 	if controls.jump_release and velocity.y < -250:
 		velocity.y *= 0.48
+
+func begin_dash(controls: Controls) -> bool:
+	if dash_cooldown > 0 or state == State.HURT or state == State.DEAD:
+		return false
+	if absf(controls.axis) > 0.1:
+		facing = signf(controls.axis)
+	attack_buffer = 0
+	attack_queued = false
+	hit_recoil_time = 0
+	focus_cancelled = true
+	focus_time = 0
+	dash_cooldown = ArenaConfig.DASH_COOLDOWN
+	velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
+	change_state(State.DASH, true)
+	arena.burst(position + Vector2(-facing * 8, -20), ArenaConfig.TEAL, 9)
+	arena.sound("dash")
+	return true
 
 func handle_attack(controls: Controls) -> void:
 	if state == State.ATTACK or attack_buffer <= 0:
@@ -209,30 +232,18 @@ func handle_attack(controls: Controls) -> void:
 	if (
 		state == State.CAST
 		or state == State.HEAL
+		or state == State.DASH
 		or state == State.HURT
 		or state == State.DEAD
 	):
 		return
 	begin_sword_attack(controls)
 
-func begin_sword_attack(controls: Controls) -> void:
-	var continuing_ground_combo := (
-		state == State.ATTACK and not attack_is_air and attack_direction.y == 0
-	)
-	attack_is_air = not is_on_floor() and not continuing_ground_combo
-	attack_direction = Vector2(facing, 0)
-	if attack_is_air:
-		combo_step = 0
-		if controls.down:
-			attack_direction = Vector2.DOWN
-		elif controls.up:
-			attack_direction = Vector2.UP
-		if attack_direction.y != 0:
-			velocity.y *= 0.62
-		else:
-			velocity.x += facing * 45
-	else:
-		velocity.x = facing * maxf(absf(velocity.x), ArenaConfig.COMBO_LUNGES[combo_step])
+func begin_sword_attack(_controls: Controls) -> void:
+	attack_variant = next_attack_variant
+	next_attack_variant = 1 - next_attack_variant
+	velocity.x = 0
+	hit_recoil_time = 0
 	hit_targets.clear()
 	attack_buffer = 0
 	attack_queued = false
@@ -240,32 +251,21 @@ func begin_sword_attack(controls: Controls) -> void:
 	change_state(State.ATTACK, true)
 
 func finish_sword_attack(controls: Controls) -> void:
-	var can_combo := not attack_is_air and attack_direction.y == 0
-	var next_combo := (combo_step + 1) % 3 if can_combo else 0
 	if attack_queued or attack_buffer > 0:
-		combo_step = next_combo
 		begin_sword_attack(controls)
 		return
-	combo_step = next_combo
-	combo_grace = ArenaConfig.COMBO_GRACE if can_combo else 0
 	change_state(State.IDLE if is_on_floor() else State.AIR)
 
 func current_attack_duration() -> float:
-	if attack_is_air:
-		return ArenaConfig.AIR_ATTACK_DURATION
-	return ArenaConfig.ATTACK_DURATIONS[combo_step]
+	return ArenaConfig.ATTACK_DURATION
 
 func current_attack_start() -> float:
-	return ArenaConfig.AIR_ATTACK_START if attack_is_air else ArenaConfig.ATTACK_STARTS[combo_step]
+	return ArenaConfig.ATTACK_START
 
 func current_attack_end() -> float:
-	return ArenaConfig.AIR_ATTACK_END if attack_is_air else ArenaConfig.ATTACK_ENDS[combo_step]
+	return ArenaConfig.ATTACK_END
 
 func attack_world_direction() -> Vector2:
-	if attack_direction == Vector2.UP:
-		return Vector2.UP
-	if attack_direction == Vector2.DOWN:
-		return Vector2.DOWN
 	return Vector2(facing, 0)
 
 func handle_focus(delta: float, controls: Controls) -> void:
@@ -310,6 +310,7 @@ func handle_focus(delta: float, controls: Controls) -> void:
 func cast_spell() -> bool:
 	if (
 		state == State.ATTACK
+		or state == State.DASH
 		or state == State.CAST
 		or state == State.HURT
 		or state == State.DEAD
@@ -326,14 +327,11 @@ func cast_spell() -> bool:
 	return true
 
 func sword_rect() -> Rect2:
-	if attack_direction == Vector2.UP:
-		return Rect2(position + Vector2(-31, -139), Vector2(62, 83))
-	if attack_direction == Vector2.DOWN:
-		return Rect2(position + Vector2(-32, -18), Vector2(64, 85))
-	var reach: float = ArenaConfig.COMBO_REACHES[combo_step]
-	var height: float = ArenaConfig.COMBO_HEIGHTS[combo_step]
-	var top: float = ArenaConfig.COMBO_TOPS[combo_step]
-	return Rect2(position + Vector2(8 if facing > 0 else -reach - 8, top), Vector2(reach, height))
+	var x := 8.0 if facing > 0 else -ArenaConfig.ATTACK_REACH - 8.0
+	return Rect2(
+		position + Vector2(x, ArenaConfig.ATTACK_TOP),
+		Vector2(ArenaConfig.ATTACK_REACH, ArenaConfig.ATTACK_HEIGHT),
+	)
 
 func hurtbox() -> Rect2:
 	return Rect2(position + Vector2(-12, -70), Vector2(24, 70))
@@ -343,12 +341,8 @@ func register_hit(target_id: int) -> bool:
 		return false
 	hit_targets.append(target_id)
 	energy = mini(energy + 1, ArenaConfig.MAX_ENERGY)
-	if attack_direction == Vector2.DOWN:
-		velocity.y = -610
-		jumps_used = 1
-	else:
-		var recoil: float = 85.0 if not is_on_floor() else ArenaConfig.GROUND_HIT_RECOILS[combo_step]
-		velocity.x = -facing * recoil
+	velocity.x = -facing * ArenaConfig.ATTACK_HIT_RECOIL
+	hit_recoil_time = ArenaConfig.ATTACK_HIT_RECOIL_TIME
 	stats_changed.emit()
 	return true
 
@@ -367,7 +361,7 @@ func take_damage(amount: int, from: Vector2) -> bool:
 	flash = 0.14
 	attack_buffer = 0
 	attack_queued = false
-	combo_grace = 0
+	hit_recoil_time = 0
 	focus_cancelled = true
 	focus_time = 0
 	velocity = Vector2(330 if position.x >= from.x else -330, -260)
@@ -388,18 +382,21 @@ func _draw_fighter() -> void:
 	match state:
 		State.RUN: pose = "run"
 		State.AIR: pose = "air"
+		State.DASH: pose = "dash"
 		State.HURT, State.DEAD: pose = "hurt"
 		State.HEAL: pose = "heal"
 		State.CAST: pose = "cast"
-		State.ATTACK:
-			if attack_direction == Vector2.DOWN:
-				pose = "down"
-			elif attack_direction == Vector2.UP:
-				pose = "up"
-			else:
-				pose = "attack"
+		State.ATTACK: pose = "attack"
 	var attack_progress := state_time / current_attack_duration() if state == State.ATTACK else 0.0
-	BoxArt.fighter(visual, pose, clock, tint, false, attack_progress, combo_step, landing_squash)
+	BoxArt.player_fighter(
+		visual,
+		pose,
+		clock,
+		tint,
+		attack_progress,
+		attack_variant,
+		landing_squash,
+	)
 	visual.draw_rect(Rect2(-14, -57, 26, 4), ArenaConfig.TEAL)
 	BoxArt.bar(
 		visual,
@@ -413,10 +410,11 @@ func _draw_fighter() -> void:
 		and state_time >= current_attack_start()
 		and state_time <= current_attack_end()
 	):
-		var direction := Vector2(attack_direction.x * facing, attack_direction.y)
+		var base_angle := -0.18 if attack_variant == 0 else 0.18
+		var sweep := 1.0 if attack_variant == 0 else -1.0
 		for i in 5:
-			var angle := direction.angle() + (float(i) - 2) * 0.27
-			var center := Vector2(0, -43) + Vector2.from_angle(angle) * (78 + combo_step * 5)
+			var angle := base_angle + (float(i) - 2) * 0.065 * sweep
+			var center := Vector2(0, -45) + Vector2.from_angle(angle) * 79
 			BoxArt.bar(
 				visual,
 				center,

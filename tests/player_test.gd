@@ -30,8 +30,7 @@ func controls(values: Dictionary = {}) -> ArenaPlayer.Controls:
 	frame.jump = values.get("jump", false)
 	frame.jump_release = values.get("jump_release", false)
 	frame.attack = values.get("attack", false)
-	frame.up = values.get("up", false)
-	frame.down = values.get("down", false)
+	frame.dash = values.get("dash", false)
 	frame.focus = values.get("focus", false)
 	frame.focus_release = values.get("focus_release", false)
 	return frame
@@ -65,47 +64,66 @@ func run() -> void:
 	player.step(1.0 / 120, controls({"attack": true}))
 	check(
 		player.state == ArenaPlayer.State.ATTACK
-		and player.combo_step == 0
-		and not player.attack_is_air,
-		"Ground attack starts on input",
+		and player.attack_variant == 0
+		and player.velocity.x == 0,
+		"Attack starts without forward movement",
 	)
+	var first_rect := player.sword_rect()
 	for i in 8:
 		player.step(1.0 / 120, idle)
 	player.step(1.0 / 120, controls({"attack": true}))
 	check(player.attack_queued, "Attack input buffers during a swing")
-	var combo_ticks := 0
-	while player.combo_step == 0 and combo_ticks < 40:
+	var attack_ticks := 0
+	while player.attack_variant == 0 and attack_ticks < 40:
 		player.step(1.0 / 120, idle)
-		combo_ticks += 1
+		attack_ticks += 1
 	check(
-		player.state == ArenaPlayer.State.ATTACK and player.combo_step == 1,
-		"Buffered input chains next attack (state=%d combo=%d air=%s queued=%s ticks=%d)" % [
-			player.state, player.combo_step, player.attack_is_air, player.attack_queued, combo_ticks
+		player.state == ArenaPlayer.State.ATTACK and player.attack_variant == 1,
+		"Buffered input starts the mirrored swing (state=%d variant=%d ticks=%d)" % [
+			player.state, player.attack_variant, attack_ticks
 		],
 	)
+	check(player.sword_rect() == first_rect, "Alternating swings use identical hitboxes")
 	check(arena.slashes >= 1, "Attack active frame emits slash feedback")
-	player.combo_step = 2
-	player.attack_is_air = false
-	player.attack_direction = Vector2.RIGHT
-	check(player.sword_rect().size.x == 122, "Combo finisher has extended reach")
-	player.change_state(ArenaPlayer.State.IDLE)
-	player.combo_step = 0
-	player.combo_grace = 0
+	for i in 40:
+		player.step(1.0 / 120, idle)
+	check(player.state == ArenaPlayer.State.IDLE, "Repeated attack has no combo continuation")
 	player.attack_buffer = 0
 	player.attack_queued = false
 	player.velocity = Vector2.ZERO
+	player.step(1.0 / 120, controls({"axis": 1.0}))
+	check(
+		player.velocity.x == ArenaConfig.RUN_SPEED,
+		"Horizontal input reaches full speed immediately",
+	)
+	player.step(1.0 / 120, controls({"axis": -1.0}))
+	check(player.velocity.x == -ArenaConfig.RUN_SPEED, "Horizontal reversal is immediate")
+	player.step(1.0 / 120, idle)
+	check(player.velocity.x == 0, "Horizontal release stops immediately")
+	player.facing = 1
 	player.step(1.0 / 120, controls({"jump": true}))
 	check(player.velocity.y < -600 and player.jumps_used == 1, "Ground jump")
+	var held_jump_speed := player.velocity.y
+	player.step(1.0 / 120, controls({"jump_release": true}))
+	check(player.velocity.y > held_jump_speed * 0.6, "Jump release produces a shorter jump")
 	player.step(1.0 / 120, controls({"jump": true}))
 	check(player.jumps_used == 2, "Double jump")
 	var before := player.velocity.y
 	player.step(1.0 / 120, controls({"jump": true}))
 	check(player.jumps_used == 2 and player.velocity.y > before, "No third jump")
-	player.step(1.0 / 120, controls({"attack": true, "down": true}))
-	check(player.attack_direction == Vector2.DOWN, "Air down slash")
+	player.step(1.0 / 120, controls({"axis": 1.0, "attack": true}))
+	check(
+		player.state == ArenaPlayer.State.ATTACK
+		and player.velocity.x == 0
+		and player.sword_rect().size.y == ArenaConfig.ATTACK_HEIGHT,
+		"Air attack stays horizontally still and uses the compact hitbox",
+	)
 	check(player.register_hit(123), "First sword hit registers")
 	check(not player.register_hit(123) and player.energy == 1, "One energy per target per swing")
-	check(player.velocity.y == -610 and player.jumps_used == 1, "Pogo restores air jump")
+	check(
+		player.velocity.x == -ArenaConfig.ATTACK_HIT_RECOIL,
+		"Sword hit applies a small backward recoil",
+	)
 	player.change_state(ArenaPlayer.State.IDLE)
 	player.energy = 2
 	check(not player.cast_spell() and arena.spells == 0, "Insufficient energy blocks spell")
@@ -124,9 +142,24 @@ func run() -> void:
 	)
 	player.restore_practice_stats()
 	check(stats_events[0] == events_before_restore + 1, "Full practice stats do not emit again")
-	check(player.take_damage(1, Vector2.ZERO), "Damage received")
+	player.change_state(ArenaPlayer.State.IDLE)
+	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
+	player.velocity = Vector2.ZERO
+	player.invulnerable = 0
+	player.dash_cooldown = 0
+	player.facing = 1
+	player.step(1.0 / 120, controls({"dash": true}))
+	check(
+		player.state == ArenaPlayer.State.DASH
+		and player.velocity.x == ArenaConfig.DASH_SPEED,
+		"C starts a forward dash",
+	)
+	check(player.take_damage(1, Vector2(800, ArenaConfig.FLOOR_Y)), "Dash collision receives damage")
 	check(not player.take_damage(1, Vector2.ZERO), "Invulnerability blocks repeat damage")
-	check(player.health == 5 and player.state == ArenaPlayer.State.HURT, "Hurt state and health")
+	check(
+		player.health == 5 and player.state == ArenaPlayer.State.HURT,
+		"Damage interrupts dash into hurt state",
+	)
 	player.invulnerable = 0
 	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
 	player.velocity = Vector2.ZERO

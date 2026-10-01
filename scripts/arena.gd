@@ -36,7 +36,7 @@ class SlamEffect extends RefCounted:
 class SlashEffect extends RefCounted:
 	var position: Vector2
 	var direction: Vector2
-	var combo: int
+	var variant: int
 	var color: Color
 	var life: float
 	var max_life: float
@@ -44,13 +44,13 @@ class SlashEffect extends RefCounted:
 	func _init(
 		origin: Vector2,
 		heading: Vector2,
-		combo_step: int,
+		swing_variant: int,
 		tint: Color,
 		duration: float,
 	) -> void:
 		position = origin
 		direction = heading.normalized()
-		combo = combo_step
+		variant = swing_variant
 		color = tint
 		life = duration
 		max_life = duration
@@ -144,12 +144,17 @@ func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
 		return
 	if source.register_hit(boss.get_instance_id()):
 		boss.take_damage(ArenaConfig.SWORD_DAMAGE, source.position)
-		var finisher := source.combo_step == 2 and not source.attack_is_air
 		var contact := rect.get_center().lerp(boss.position + Vector2(0, -60), 0.58)
-		burst(contact, Color.WHITE, 24 if finisher else 17)
-		show_slash(contact, source.attack_world_direction(), source.combo_step, ArenaConfig.INK, 0.10)
-		sound("hit_heavy" if finisher else "hit")
-		impact(7 if finisher else 4.5, 0.075 if finisher else 0.052)
+		burst(contact, Color.WHITE, 17)
+		show_slash(
+			contact,
+			source.attack_world_direction(),
+			source.attack_variant,
+			ArenaConfig.INK,
+			0.10,
+		)
+		sound("hit")
+		impact(4.5, 0.052)
 
 func strike(rect: Rect2, from: Vector2) -> void:
 	if combat_active and rect.intersects(player.hurtbox()):
@@ -214,11 +219,11 @@ func show_slam(rect: Rect2, tint: Color) -> void:
 func show_slash(
 	origin: Vector2,
 	direction: Vector2,
-	combo: int,
+	variant: int,
 	tint: Color = ArenaConfig.TEAL,
 	life: float = 0.16,
 ) -> void:
-	slashes.append(SlashEffect.new(origin, direction, combo, tint, life))
+	slashes.append(SlashEffect.new(origin, direction, variant, tint, life))
 
 func impact(power: float, duration: float) -> void:
 	shake = maxf(shake, power)
@@ -293,11 +298,11 @@ func draw_effects() -> void:
 	for slash in slashes:
 		var alpha: float = slash.life / slash.max_life
 		var base_angle: float = slash.direction.angle()
-		var sweep := -1.0 if slash.combo == 1 else 1.0
-		var reach: float = 88.0 + slash.combo * 9.0
+		var sweep := -1.0 if slash.variant == 1 else 1.0
+		var reach := 90.0
 		for i in 6:
 			var phase := float(i) / 5.0
-			var angle := base_angle + lerpf(-0.48, 0.42, phase) * sweep
+			var angle := base_angle + lerpf(-0.22, 0.22, phase) * sweep
 			var start: Vector2 = slash.position + Vector2.from_angle(angle) * (reach * 0.42)
 			var finish: Vector2 = slash.position + Vector2.from_angle(angle) * reach
 			var tint: Color = slash.color
