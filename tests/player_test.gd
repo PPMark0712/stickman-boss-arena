@@ -67,9 +67,12 @@ func run() -> void:
 	check(
 		player.state == ArenaPlayer.State.ATTACK
 		and player.attack_variant == 0
-		and player.velocity.x == 0,
+		and player.velocity.x == 0
+		and player.attack_movement_locked,
 		"Attack starts without forward movement",
 	)
+	player.step(1.0 / 120, controls({"axis": 1.0}))
+	check(player.velocity.x == 0, "A stationary attack locks movement until the swing ends")
 	var first_rect := player.sword_rect()
 	for i in 8:
 		player.step(1.0 / 120, idle)
@@ -102,6 +105,21 @@ func run() -> void:
 	check(player.velocity.x == -ArenaConfig.RUN_SPEED, "Horizontal reversal is immediate")
 	player.step(1.0 / 120, idle)
 	check(player.velocity.x == 0, "Horizontal release stops immediately")
+	player.step(1.0 / 120, controls({"axis": 1.0, "attack": true}))
+	check(
+		player.state == ArenaPlayer.State.ATTACK
+		and not player.attack_movement_locked
+		and player.velocity.x == ArenaConfig.RUN_SPEED,
+		"Attacking while moving preserves horizontal speed",
+	)
+	player.step(1.0 / 120, controls({"axis": -1.0}))
+	check(
+		player.velocity.x == -ArenaConfig.RUN_SPEED and player.facing < 0,
+		"A moving attack continues responding to horizontal direction",
+	)
+	for i in 45:
+		player.step(1.0 / 120, idle)
+	check(player.state == ArenaPlayer.State.IDLE, "Moving attack returns to idle normally")
 	player.step(1.0 / 120, controls({"up": true, "attack": true}))
 	check(
 		player.state == ArenaPlayer.State.ATTACK
@@ -126,11 +144,11 @@ func run() -> void:
 	player.step(1.0 / 120, controls({"axis": 1.0, "attack": true}))
 	check(
 		player.state == ArenaPlayer.State.ATTACK
-		and player.velocity.x == 0
+		and player.velocity.x == ArenaConfig.RUN_SPEED
 		and player.sword_rect().size.x == ArenaConfig.ATTACK_REACH
-		and ArenaConfig.ATTACK_REACH > 100
+		and ArenaConfig.ATTACK_REACH > 126
 		and player.sword_rect().size.y == ArenaConfig.ATTACK_HEIGHT,
-		"Air attack stays still and uses the enlarged horizontal hitbox",
+		"Air attack preserves movement and uses the enlarged horizontal hitbox",
 	)
 	check(player.register_hit(123), "First sword hit registers")
 	check(not player.register_hit(123) and player.energy == 1, "One energy per target per swing")
@@ -218,20 +236,85 @@ func run() -> void:
 	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
 	player.velocity = Vector2.ZERO
 	player.jump_buffer = 0
-	player.change_state(ArenaPlayer.State.AIR)
+	player.change_state(ArenaPlayer.State.IDLE)
 	player.step(1.0 / 120, controls({"focus_release": true}))
-	player.energy = 6
-	for i in 20:
+	for i in 3:
 		player.step(1.0 / 120, idle)
 	var focus_held := controls({"focus": true})
-	for i in 185:
+	player.energy = 6
+	var spells_before_tap: int = arena.spells
+	for i in 10:
 		player.step(1.0 / 120, focus_held)
-	check(player.health == 6 and player.energy == 3, "Holding A heals one health for three energy")
-	for i in 200:
-		player.step(1.0 / 120, focus_held)
-	check(player.energy == 3, "One heal per press")
 	player.step(1.0 / 120, controls({"focus_release": true}))
-	check(arena.spells == 1, "Healing release does not cast")
+	check(
+		arena.spells == spells_before_tap + 1 and player.energy == 3,
+		"Releasing A within 0.1 seconds casts a spell",
+	)
+	for i in 35:
+		player.step(1.0 / 120, idle)
+	var spells_before_dead_zone: int = arena.spells
+	for i in 18:
+		player.step(1.0 / 120, focus_held)
+	player.step(1.0 / 120, controls({"focus_release": true}))
+	check(
+		arena.spells == spells_before_dead_zone and player.energy == 3,
+		"Releasing A between 0.1 and 0.3 seconds does nothing",
+	)
+	player.health = 5
+	for i in 37:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.state == ArenaPlayer.State.HEAL
+		and player.focus_energy_spent == 1
+		and player.energy == 2,
+		"Healing starts at 0.3 seconds and consumes its first energy",
+	)
+	for i in 24:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.focus_energy_spent == 2 and player.energy == 1,
+		"Healing consumes another energy every 0.2 seconds",
+	)
+	player.step(1.0 / 120, controls({"focus_release": true}))
+	check(
+		player.state == ArenaPlayer.State.IDLE
+		and player.health == 5
+		and player.energy == 1,
+		"Releasing an incomplete heal cancels without refunding energy",
+	)
+	player.energy = 3
+	for i in 109:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.health == 6
+		and player.energy == 0
+		and player.focus_consumed
+		and player.state == ArenaPlayer.State.IDLE,
+		"Holding A for 0.9 seconds heals one health after three staged costs",
+	)
+	for i in 120:
+		player.step(1.0 / 120, focus_held)
+	check(player.health == 6 and player.energy == 0, "One heal completes per press")
+	player.step(1.0 / 120, controls({"focus_release": true}))
+	check(arena.spells == spells_before_dead_zone, "Healing release does not cast")
+	player.invulnerable = 0
+	check(player.take_damage(1, Vector2.ZERO), "Damage prepares an interrupted heal case")
+	for i in 40:
+		player.step(1.0 / 120, idle)
+	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
+	player.velocity = Vector2.ZERO
+	player.change_state(ArenaPlayer.State.IDLE)
+	player.invulnerable = 0
+	player.energy = 3
+	player.step(1.0 / 120, controls({"focus_release": true}))
+	for i in 61:
+		player.step(1.0 / 120, focus_held)
+	check(player.state == ArenaPlayer.State.HEAL and player.energy == 1, "Heal spends energy before interruption")
+	check(player.take_damage(1, Vector2.ZERO), "Damage interrupts healing")
+	check(
+		player.state == ArenaPlayer.State.HURT and player.energy == 1,
+		"Interrupted healing does not refund consumed energy",
+	)
 	player.invulnerable = 0
 	player.take_damage(99, Vector2.ZERO)
 	check(player.state == ArenaPlayer.State.DEAD and player.health == 0, "Death state clamps health")

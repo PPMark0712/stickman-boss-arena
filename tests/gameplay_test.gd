@@ -18,6 +18,22 @@ func frames(count: int) -> void:
 		await physics_frame
 
 func run() -> void:
+	check(
+		ArenaBoss.COMBO_FIRST_SLAM >= 0.70
+		and ArenaBoss.COMBO_SECOND_SLAM - ArenaBoss.COMBO_SECOND_WINDUP >= 0.70,
+		"Both Quarry combo slams have a readable raised-hammer windup",
+	)
+	check(
+		ArenaBoss.COMBO_SECOND_WINDUP - ArenaBoss.COMBO_FIRST_SLAM >= 0.24
+		and ArenaBoss.COMBO_LAUNCH_WINDUP - ArenaBoss.COMBO_SECOND_SLAM >= 0.24,
+		"Quarry combo pauses after each ground impact",
+	)
+	check(
+		ArenaBoss.COMBO_LAUNCH - ArenaBoss.COMBO_LAUNCH_WINDUP >= 0.65
+		and ArenaBoss.COMBO_GRAVITY_REDUCTION > 0
+		and ArenaBoss.COMBO_MIN_AIR_TIME >= 0.5,
+		"Quarry combo has a full launch windup and slower airborne finish",
+	)
 	var quarry_idle: Dictionary = BoxArt.heavy_rig_snapshot("idle", 0.0)
 	var quarry_windup: Dictionary = BoxArt.heavy_rig_snapshot("windup", 1.0)
 	var quarry_impact: Dictionary = BoxArt.heavy_rig_snapshot("slam", 1.0)
@@ -212,9 +228,18 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	room.boss.cooldown = 0
 	room.boss.begin_attack(attack)
 	var ticks := 0
+	var combo_air_ticks := 0
 	while not room.boss.action.is_empty() and ticks < 1100:
 		await physics_frame
 		ticks += 1
+		if (
+			attack == "combo"
+			and room.boss.event_index == 5
+			and not room.boss.is_on_floor()
+		):
+			combo_air_ticks += 1
 	check(ticks < 1100, "Attack completes: %d / %s" % [room.kind, attack])
 	check(room.boss.position.y <= ArenaConfig.FLOOR_Y + 1, "Boss stays above floor: " + attack)
+	if attack == "combo":
+		check(combo_air_ticks >= 60, "Quarry combo keeps a readable airborne spin")
 	room.boss.cooldown = 1000

@@ -9,6 +9,14 @@ const HAMMER_PHASE_ONE := ["slam", "wave", "jump"]
 const HAMMER_PHASE_TWO := ["jump", "combo", "rain", "wave"]
 const MIRROR_PHASE_ONE := ["thrust", "boomerang", "dive"]
 const MIRROR_PHASE_TWO := ["thrust", "fan", "dive", "blades"]
+const COMBO_FIRST_SLAM := 0.72
+const COMBO_SECOND_WINDUP := 0.98
+const COMBO_SECOND_SLAM := 1.72
+const COMBO_LAUNCH_WINDUP := 1.98
+const COMBO_LAUNCH := 2.66
+const COMBO_LAUNCH_SPEED := -900.0
+const COMBO_GRAVITY_REDUCTION := 620.0
+const COMBO_MIN_AIR_TIME := 0.55
 
 var arena: Node2D
 var kind := 0
@@ -130,7 +138,7 @@ func _perform_attack(delta: float) -> ArenaBT.Status:
 	if action.is_empty():
 		begin_attack(choose_attack())
 	action_time += delta
-	var finished := hammer_attack() if kind == 0 else mirror_attack()
+	var finished := hammer_attack(delta) if kind == 0 else mirror_attack()
 	if not finished:
 		return ArenaBT.Status.RUNNING
 	action = ""
@@ -145,7 +153,7 @@ func at(time: float, index: int) -> bool:
 		return true
 	return false
 
-func hammer_attack() -> bool:
+func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 	match action:
 		"slam", "wave":
 			if at(windup_duration(), 0):
@@ -157,7 +165,7 @@ func hammer_attack() -> bool:
 			if event_index == 1:
 				set_pose("windup")
 				if velocity.y > 50:
-					velocity.y += 45
+					velocity.y += 360.0 * delta
 				if is_on_floor() and action_time > 0.65:
 					event_index = 2
 					velocity.x = 0
@@ -165,25 +173,27 @@ func hammer_attack() -> bool:
 					action_time = 0
 			return event_index == 2 and action_time >= 0.50
 		"combo":
-			if at(0.62, 0):
+			if at(COMBO_FIRST_SLAM, 0):
 				slam(false, false)
-			if at(0.78, 1):
+			if at(COMBO_SECOND_WINDUP, 1):
 				face_player()
 				set_pose("windup", true)
-			if at(1.34, 2):
+			if at(COMBO_SECOND_SLAM, 2):
 				face_player()
 				slam(false, false)
-			if at(1.50, 3):
+			if at(COMBO_LAUNCH_WINDUP, 3):
 				set_pose("windup", true)
-			if at(1.82, 4):
-				launch(-960)
+			if at(COMBO_LAUNCH, 4):
+				launch(COMBO_LAUNCH_SPEED)
 			if event_index == 5:
 				set_pose("attack")
-				if action_time < 2.55:
+				if action_time < 4.4:
 					arena.strike(Rect2(position + Vector2(-95, -150), Vector2(190, 155)), position)
-				if velocity.y > 0:
-					velocity.y += 55
-				if is_on_floor() and action_time > 2.06:
+				velocity.y -= COMBO_GRAVITY_REDUCTION * delta
+				if (
+					is_on_floor()
+					and action_time > COMBO_LAUNCH + COMBO_MIN_AIR_TIME
+				):
 					event_index = 6
 					velocity.x = 0
 					slam(true, true, true)
@@ -341,7 +351,7 @@ func windup_duration() -> float:
 		"jump":
 			return 0.52 if phase == 1 else 0.34
 		"combo":
-			return 0.62
+			return COMBO_FIRST_SLAM
 		"rain":
 			return 0.60
 		"thrust":
@@ -362,7 +372,7 @@ func visual_progress() -> float:
 	if kind == 0 and pose == "slam":
 		return clampf(pose_time / 0.18, 0.0, 1.0)
 	if pose == "attack" and action == "combo":
-		return fmod(action_time * 1.8, 1.0)
+		return fmod(maxf(0.0, action_time - COMBO_LAUNCH) * 1.05, 1.0)
 	if pose == "attack" or pose == "slam" or pose == "down":
 		return 0.88
 	return 0.0

@@ -35,10 +35,12 @@ var attack_buffer := 0.0
 var attack_queued := false
 var attack_variant := 0
 var next_attack_variant := 0
+var attack_movement_locked := true
 var slash_emitted := false
 var hit_recoil_time := 0.0
 var dash_cooldown := 0.0
 var focus_time := 0.0
+var focus_energy_spent := 0
 var focus_consumed := false
 var focus_cancelled := false
 var landing_squash := 0.0
@@ -99,9 +101,9 @@ func step(delta: float, controls: Controls) -> void:
 	coyote = ArenaConfig.COYOTE_TIME if is_on_floor() else maxf(0, coyote - delta)
 	if is_on_floor():
 		jumps_used = 0
-	if controls.jump:
+	if controls.jump and state != State.HEAL:
 		jump_buffer = ArenaConfig.JUMP_BUFFER
-	if controls.attack:
+	if controls.attack and state != State.HEAL:
 		attack_buffer = ArenaConfig.ATTACK_BUFFER
 		if state == State.ATTACK:
 			attack_queued = true
@@ -121,13 +123,13 @@ func step(delta: float, controls: Controls) -> void:
 		return
 	if state == State.HURT:
 		if controls.focus_release:
-			focus_cancelled = false
-			focus_consumed = false
-			focus_time = 0
+			reset_focus()
 		velocity.x = move_toward(velocity.x, 0, 1100 * delta)
 		if state_time >= 0.24:
 			change_state(State.IDLE if is_on_floor() else State.AIR)
 	elif state == State.DASH:
+		if controls.focus_release:
+			reset_focus()
 		velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
 		if state_time >= ArenaConfig.DASH_DURATION:
 			velocity.x = 0
@@ -172,24 +174,18 @@ func step(delta: float, controls: Controls) -> void:
 
 func handle_movement(_delta: float, controls: Controls) -> void:
 	var axis := controls.axis
-	var preserves_air_movement := (
-		state == State.ATTACK
-		and attack_direction.y != 0
-		and (not is_on_floor() or velocity.y < 0)
-	)
 	if state == State.HEAL:
 		velocity.x = 0
-		if absf(axis) > 0.1 or controls.jump or controls.attack:
-			focus_cancelled = true
-			change_state(State.IDLE)
-		else:
-			return
+		return
 	if state == State.ATTACK:
-		if hit_recoil_time <= 0 and preserves_air_movement and axis != 0:
-			facing = signf(axis)
-			velocity.x = axis * ArenaConfig.RUN_SPEED
-		elif hit_recoil_time <= 0 and not preserves_air_movement:
-			velocity.x = 0
+		if hit_recoil_time <= 0:
+			if attack_movement_locked:
+				velocity.x = 0
+			elif axis != 0:
+				facing = signf(axis)
+				velocity.x = axis * ArenaConfig.RUN_SPEED
+			else:
+				velocity.x = 0
 	elif axis != 0:
 		if (
 			is_on_floor()
@@ -223,7 +219,12 @@ func handle_movement(_delta: float, controls: Controls) -> void:
 		velocity.y *= 0.48
 
 func begin_dash(controls: Controls) -> bool:
-	if dash_cooldown > 0 or state == State.HURT or state == State.DEAD:
+	if (
+		dash_cooldown > 0
+		or state == State.HEAL
+		or state == State.HURT
+		or state == State.DEAD
+	):
 		return false
 	if absf(controls.axis) > 0.1:
 		facing = signf(controls.axis)
@@ -232,6 +233,7 @@ func begin_dash(controls: Controls) -> bool:
 	hit_recoil_time = 0
 	focus_cancelled = true
 	focus_time = 0
+	focus_energy_spent = 0
 	dash_cooldown = ArenaConfig.DASH_COOLDOWN
 	velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
 	change_state(State.DASH, true)
@@ -261,7 +263,8 @@ func begin_sword_attack(controls: Controls) -> void:
 		attack_direction = Vector2.UP
 	elif airborne and controls.down:
 		attack_direction = Vector2.DOWN
-	if not airborne or attack_direction.y == 0:
+	attack_movement_locked = absf(velocity.x) < 1.0
+	if attack_movement_locked:
 		velocity.x = 0
 	hit_recoil_time = 0
 	hit_targets.clear()
@@ -299,43 +302,76 @@ func attack_world_direction() -> Vector2:
 	return Vector2(facing, 0)
 
 func handle_focus(delta: float, controls: Controls) -> void:
-	if state == State.ATTACK or state == State.CAST:
-		if controls.focus_release:
-			focus_time = 0
-			focus_cancelled = false
-			focus_consumed = false
-			return
-	if controls.focus:
-		focus_time += delta
-		if focus_time >= 0.22 and not focus_consumed and not focus_cancelled:
-			if energy < ArenaConfig.ENERGY_COST:
-				arena.notify("需要 3 格能量 · 挥剑命中可积攒")
-				focus_cancelled = true
-			elif health >= ArenaConfig.MAX_HEALTH:
-				arena.notify("生命已满 · 短按 A 释放法术")
-				focus_cancelled = true
-			elif not is_on_floor():
-				arena.notify("落地后长按 A 回血")
-				focus_cancelled = true
-			elif state != State.ATTACK and state != State.CAST:
-				if state != State.HEAL:
-					change_state(State.HEAL)
-				if focus_time >= ArenaConfig.HEAL_TIME:
-					energy -= ArenaConfig.ENERGY_COST
-					health = mini(health + 1, ArenaConfig.MAX_HEALTH)
-					focus_consumed = true
-					change_state(State.IDLE)
-					arena.burst(position + Vector2(0, -40), ArenaConfig.TEAL, 22)
-					arena.sound("heal")
-					stats_changed.emit()
 	if controls.focus_release:
-		if focus_time > 0 and focus_time < 0.22 and not focus_consumed and not focus_cancelled:
+		if (
+			focus_time > 0
+			and focus_time <= ArenaConfig.FOCUS_TAP_TIME
+			and not focus_consumed
+			and not focus_cancelled
+		):
 			cast_spell()
 		if state == State.HEAL:
 			change_state(State.IDLE)
-		focus_time = 0
-		focus_cancelled = false
-		focus_consumed = false
+		reset_focus()
+		return
+	if not controls.focus:
+		return
+	if (
+		state == State.ATTACK
+		or state == State.CAST
+		or state == State.DASH
+		or state == State.HURT
+		or state == State.DEAD
+	):
+		focus_cancelled = true
+		return
+	if focus_cancelled or focus_consumed:
+		return
+	focus_time += delta
+	if focus_time < ArenaConfig.HEAL_START_TIME:
+		return
+	if state != State.HEAL:
+		if health >= ArenaConfig.MAX_HEALTH:
+			arena.notify("生命已满 · 短按 A 释放法术")
+			focus_cancelled = true
+			return
+		if not is_on_floor():
+			arena.notify("落地后长按 A 回血")
+			focus_cancelled = true
+			return
+		change_state(State.HEAL)
+	while (
+		focus_energy_spent < ArenaConfig.ENERGY_COST
+		and focus_time
+		>= (
+			ArenaConfig.HEAL_START_TIME
+			+ focus_energy_spent * ArenaConfig.HEAL_DRAIN_INTERVAL
+		)
+	):
+		if energy <= 0:
+			arena.notify("能量耗尽 · 已消耗的能量不会返还")
+			focus_cancelled = true
+			change_state(State.IDLE)
+			return
+		energy -= 1
+		focus_energy_spent += 1
+		stats_changed.emit()
+	if (
+		focus_time >= ArenaConfig.HEAL_COMPLETE_TIME
+		and focus_energy_spent == ArenaConfig.ENERGY_COST
+	):
+		health = mini(health + 1, ArenaConfig.MAX_HEALTH)
+		focus_consumed = true
+		change_state(State.IDLE)
+		arena.burst(position + Vector2(0, -40), ArenaConfig.TEAL, 22)
+		arena.sound("heal")
+		stats_changed.emit()
+
+func reset_focus() -> void:
+	focus_time = 0
+	focus_energy_spent = 0
+	focus_consumed = false
+	focus_cancelled = false
 
 func cast_spell() -> bool:
 	if (
@@ -408,6 +444,7 @@ func take_damage(amount: int, from: Vector2) -> bool:
 	hit_recoil_time = 0
 	focus_cancelled = true
 	focus_time = 0
+	focus_energy_spent = 0
 	velocity = Vector2(330 if position.x >= from.x else -330, -260)
 	change_state(State.HURT if health > 0 else State.DEAD)
 	arena.burst(position + Vector2(0, -40), ArenaConfig.DANGER, 20)
@@ -464,20 +501,30 @@ func _draw_fighter() -> void:
 		var direction := attack_world_direction()
 		if direction.x != 0:
 			direction = Vector2.RIGHT
-		var sweep := 1.0 if attack_variant == 0 else -1.0
-		for i in 5:
-			var angle := direction.angle() + (float(i) - 2) * 0.075 * sweep
-			var center := Vector2(0, -45) + Vector2.from_angle(angle) * 98
-			BoxArt.bar(
-				visual,
-				center,
-				center + Vector2.from_angle(angle + PI * 0.5) * 18,
-				3,
-				Color(0.75, 1, 0.9, 0.58 - i * 0.07),
-			)
+		BoxArt.slash_arc(
+			visual,
+			Vector2(0, -45),
+			direction,
+			attack_variant,
+			ArenaConfig.TEAL,
+			0.74,
+			124.0 if direction.x != 0 else 118.0,
+		)
 	if state == State.HEAL:
 		BoxArt.outline(visual, Rect2(-21, -86, 42, 6), ArenaConfig.MUTED, 1)
+		var heal_progress := clampf(
+			(
+				focus_time
+				- ArenaConfig.HEAL_START_TIME
+			)
+			/ (
+				ArenaConfig.HEAL_COMPLETE_TIME
+				- ArenaConfig.HEAL_START_TIME
+			),
+			0.0,
+			1.0,
+		)
 		visual.draw_rect(
-			Rect2(-20, -85, 40 * minf(1, focus_time / ArenaConfig.HEAL_TIME), 4),
+			Rect2(-20, -85, 40 * heal_progress, 4),
 			ArenaConfig.TEAL,
 		)

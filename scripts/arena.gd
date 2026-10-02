@@ -221,7 +221,7 @@ func show_slash(
 	direction: Vector2,
 	variant: int,
 	tint: Color = ArenaConfig.TEAL,
-	life: float = 0.16,
+	life: float = 0.22,
 ) -> void:
 	slashes.append(SlashEffect.new(origin, direction, variant, tint, life))
 
@@ -297,17 +297,16 @@ func draw_effects() -> void:
 		effects.draw_rect(slam_.rect, tint)
 	for slash in slashes:
 		var alpha: float = slash.life / slash.max_life
-		var base_angle: float = slash.direction.angle()
-		var sweep := -1.0 if slash.variant == 1 else 1.0
-		var reach := 116.0
-		for i in 6:
-			var phase := float(i) / 5.0
-			var angle := base_angle + lerpf(-0.22, 0.22, phase) * sweep
-			var start: Vector2 = slash.position + Vector2.from_angle(angle) * (reach * 0.42)
-			var finish: Vector2 = slash.position + Vector2.from_angle(angle) * reach
-			var tint: Color = slash.color
-			tint.a = alpha * (0.18 + phase * 0.10)
-			BoxArt.bar(effects, start, finish, 2.0 + alpha * 2.0, tint)
+		var reach := 150.0 if absf(slash.direction.x) > 0.5 else 142.0
+		BoxArt.slash_arc(
+			effects,
+			slash.position,
+			slash.direction,
+			slash.variant,
+			slash.color,
+			alpha,
+			reach,
+		)
 	# Falling hazards and the Prism keep explicit targeting cues. The Quarry
 	# communicates its first hit through the raised hammer silhouette instead.
 	if combat_active and not boss.dead:

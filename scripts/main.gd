@@ -313,6 +313,7 @@ func toggle_pause() -> void:
 		overlay = null
 		# A held across focus loss must never complete an unintended heal.
 		room.player.focus_time = 0
+		room.player.focus_energy_spent = 0
 		room.player.focus_cancelled = Input.is_action_pressed("focus")
 		if room.player.state == ArenaPlayer.State.HEAL:
 			room.player.change_state(ArenaPlayer.State.IDLE)
