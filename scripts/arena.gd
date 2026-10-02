@@ -200,7 +200,7 @@ func spawn_spell(at_position: Vector2, direction: float) -> void:
 func spawn_wave(at_position: Vector2, direction: float, tint: Color) -> void:
 	var projectile := new_hazard("wave", Vector2(at_position.x, ArenaConfig.FLOOR_Y), tint)
 	projectile.velocity.x = direction * (300 if boss.phase == 1 else 370)
-	projectile.size = Vector2(50, ArenaHazard.WAVE_MAX_HEIGHT)
+	projectile.size = Vector2(ArenaHazard.WAVE_WIDTH, ArenaHazard.WAVE_MAX_HEIGHT)
 	attacks_spawned.wave += 1
 
 func spawn_rock(x: float, delay: float, blade: bool = false) -> void:

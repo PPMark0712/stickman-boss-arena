@@ -163,15 +163,6 @@ func step(delta: float, controls: Controls) -> void:
 				change_state(next)
 	var impact_speed := velocity.y
 	move_and_slide()
-	var jump_ceiling := ArenaConfig.FLOOR_Y - ArenaConfig.PLAYER_MAX_JUMP_HEIGHT
-	if (
-		jumps_used > 0
-		and state != State.HURT
-		and state != State.DEAD
-		and position.y < jump_ceiling
-	):
-		position.y = jump_ceiling
-		velocity.y = maxf(0.0, velocity.y)
 	var grounded_now := is_on_floor()
 	if grounded_now and not was_grounded and impact_speed > 250:
 		landing_squash = clampf((impact_speed - 200) / 700.0, 0.35, 1.0)

@@ -143,35 +143,38 @@ func run() -> void:
 	check(player.jumps_used == 2 and player.velocity.y > before, "No third jump")
 	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
 	player.velocity = Vector2(0, 80)
+	player.jump_buffer = 0
+	player.jumps_used = 0
 	player.change_state(ArenaPlayer.State.IDLE)
 	for i in 3:
 		player.step(1.0 / 120, idle)
+	var first_jump_origin := player.position.y
 	player.step(1.0 / 120, controls({"jump": true}))
-	var single_jump_apex := player.position.y
-	for i in 140:
+	var first_jump_apex := player.position.y
+	var first_rise_ticks := 0
+	while player.velocity.y < 0 and first_rise_ticks < 120:
 		player.step(1.0 / 120, idle)
-		single_jump_apex = minf(single_jump_apex, player.position.y)
+		first_jump_apex = minf(first_jump_apex, player.position.y)
+		first_rise_ticks += 1
+	var first_jump_height := first_jump_origin - first_jump_apex
 	check(
-		ArenaConfig.FLOOR_Y - single_jump_apex <= ArenaConfig.PLAYER_MAX_JUMP_HEIGHT,
-		"Single jump stays below the configured 1.8-body ceiling",
+		absf(first_jump_height - ArenaConfig.PLAYER_JUMP_HEIGHT) <= 2.0,
+		"Full first jump rises about 1.8 player heights",
 	)
-	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
-	player.velocity = Vector2(0, 80)
-	player.change_state(ArenaPlayer.State.IDLE)
-	for i in 3:
-		player.step(1.0 / 120, idle)
+	var second_jump_origin := player.position.y
 	player.step(1.0 / 120, controls({"jump": true}))
-	var double_jump_apex := player.position.y
-	for i in 140:
-		var jump_again := controls({"jump": true}) if i == 20 else idle
-		player.step(1.0 / 120, jump_again)
-		double_jump_apex = minf(double_jump_apex, player.position.y)
+	var second_jump_apex := player.position.y
+	var second_rise_ticks := 0
+	while player.velocity.y < 0 and second_rise_ticks < 120:
+		player.step(1.0 / 120, idle)
+		second_jump_apex = minf(second_jump_apex, player.position.y)
+		second_rise_ticks += 1
+	var second_jump_height := second_jump_origin - second_jump_apex
 	check(
-		is_equal_approx(
-			ArenaConfig.FLOOR_Y - double_jump_apex,
-			ArenaConfig.PLAYER_MAX_JUMP_HEIGHT,
-		),
-		"Double jump reaches but does not exceed the 1.8-body ceiling",
+		absf(second_jump_height - ArenaConfig.PLAYER_JUMP_HEIGHT) <= 2.0
+		and absf(second_jump_height - first_jump_height) <= 0.5,
+		"Full jumps have equal 1.8-body rise (first %.2f, second %.2f)"
+		% [first_jump_height, second_jump_height],
 	)
 	player.step(1.0 / 120, controls({"axis": 1.0, "attack": true}))
 	check(

@@ -59,6 +59,11 @@ func run() -> void:
 		"Quarry hammer uses the shortened shared weapon reach",
 	)
 	check(
+		BoxArt.HEAVY_HAMMER_SILVER.get_luminance()
+		> ArenaConfig.BACKGROUND.get_luminance() + 0.35,
+		"Quarry silver hammer remains distinct from the dark arena",
+	)
+	check(
 		quarry_windup.hammer_center.y < quarry_idle.hammer_center.y,
 		"Quarry windup raises the hammer above its idle position",
 	)
@@ -259,8 +264,9 @@ func run() -> void:
 		) as ArenaHazard
 		check(
 			cleared_hazard.size.y > ArenaConfig.PLAYER_HEIGHT
-			and ArenaHazard.WAVE_MAX_HEIGHT == 78.0,
-			"Ground wave is slightly taller than the player",
+				and cleared_hazard.size.x == ArenaHazard.WAVE_WIDTH
+				and cleared_hazard.size.x > cleared_hazard.size.y,
+				"Ground wave is slightly wider than its player-tall height",
 		)
 		room.clear_hazards()
 		check(

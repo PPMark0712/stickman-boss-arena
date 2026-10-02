@@ -4,6 +4,9 @@ extends RefCounted
 
 const HEAVY_HAMMER_REACH := 64.0
 const HEAVY_HAMMER_HEAD_RADIUS := 30.0
+const HEAVY_HAMMER_SILVER := Color("#b8c3cb")
+const HEAVY_HAMMER_SILVER_DARK := Color("#66737d")
+const HEAVY_HAMMER_SILVER_HIGHLIGHT := Color("#edf2f5")
 
 class HeavyPose extends RefCounted:
 	var body_lean := 0.0
@@ -664,11 +667,12 @@ static func _draw_heavy_hammer(
 	angle: float,
 	color: Color,
 ) -> void:
-	var metal_black := Color("#080a0d", color.a)
-	var metal_edge := Color("#252c32", color.a)
+	var silver := Color(HEAVY_HAMMER_SILVER, color.a)
+	var silver_dark := Color(HEAVY_HAMMER_SILVER_DARK, color.a)
+	var silver_highlight := Color(HEAVY_HAMMER_SILVER_HIGHLIGHT, color.a)
 	var gold := Color(ArenaConfig.AMBER, color.a)
-	bar(canvas, shaft_start, hammer_center, 8, metal_edge)
-	bar(canvas, shaft_start, hammer_center, 5, metal_black)
+	bar(canvas, shaft_start, hammer_center, 8, silver_dark)
+	bar(canvas, shaft_start, hammer_center, 5, silver)
 	canvas.draw_set_transform(hammer_center, angle)
 	for i in 8:
 		var spike_angle := i * TAU / 8.0
@@ -680,9 +684,9 @@ static func _draw_heavy_hammer(
 			direction * HEAVY_HAMMER_HEAD_RADIUS,
 			base + normal * 4,
 		]), gold)
-	canvas.draw_circle(Vector2.ZERO, 24, metal_black)
-	canvas.draw_circle(Vector2.ZERO, 19, Color("#11161b", color.a))
-	canvas.draw_arc(Vector2.ZERO, 20, 0, TAU, 32, metal_edge, 3)
+	canvas.draw_circle(Vector2.ZERO, 24, silver_dark)
+	canvas.draw_circle(Vector2.ZERO, 19, silver)
+	canvas.draw_arc(Vector2.ZERO, 20, 0, TAU, 32, silver_highlight, 3)
 	for stud_angle in [PI * 0.25, PI * 0.75, PI * 1.25, PI * 1.75]:
 		var stud := Vector2.from_angle(stud_angle) * 10
 		canvas.draw_circle(stud, 2.5, gold)
