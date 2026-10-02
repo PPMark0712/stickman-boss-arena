@@ -1,6 +1,9 @@
 class_name BoxArt
 extends RefCounted
-## Even diagonals, particles and curved-looking effects are made of rectangles.
+## Procedural geometric art shared by fighters and combat effects.
+
+const HEAVY_HAMMER_REACH := 64.0
+const HEAVY_HAMMER_HEAD_RADIUS := 30.0
 
 class HeavyPose extends RefCounted:
 	var body_lean := 0.0
@@ -465,7 +468,7 @@ static func _draw_heavy_fighter(
 	var right_grip := body_center + motion.right_grip
 	var left_grip := right_grip - shaft_direction * 34
 	var shaft_start := left_grip - shaft_direction * 5
-	var hammer_center := right_grip + shaft_direction * 80
+	var hammer_center := right_grip + shaft_direction * HEAVY_HAMMER_REACH
 	var left_shoulder := body_center + Vector2(8, -15)
 	var right_shoulder := body_center + Vector2(18, -21)
 	var left_elbow := _two_bone_elbow(left_shoulder, left_grip, 27, 1)
@@ -582,12 +585,13 @@ static func heavy_rig_snapshot(
 	var shaft_direction := Vector2.from_angle(motion.hammer_angle)
 	var right_grip := body_center + motion.right_grip
 	var left_grip := right_grip - shaft_direction * 34
-	var hammer_center := right_grip + shaft_direction * 80
+	var hammer_center := right_grip + shaft_direction * HEAVY_HAMMER_REACH
 	var left_shoulder := body_center + Vector2(8, -15)
 	var right_shoulder := body_center + Vector2(18, -21)
 	return {
 		"body_center": body_center,
 		"hammer_center": hammer_center,
+		"hammer_radius": HEAVY_HAMMER_HEAD_RADIUS,
 		"left_grip": left_grip,
 		"right_grip": right_grip,
 		"left_shoulder": left_shoulder,
@@ -639,8 +643,22 @@ static func _draw_heavy_hammer(
 ) -> void:
 	bar(canvas, shaft_start, hammer_center, 7, color.darkened(0.16))
 	bar(canvas, shaft_start, hammer_center, 3, color.darkened(0.34))
-	canvas.draw_set_transform(hammer_center, angle + PI * 0.5)
-	canvas.draw_rect(Rect2(-25, -17, 50, 34), Color("#27303a"))
-	outline(canvas, Rect2(-25, -17, 50, 34), color, 4)
-	canvas.draw_rect(Rect2(-17, -11, 34, 5), color.darkened(0.38))
+	canvas.draw_set_transform(hammer_center, angle)
+	for i in 8:
+		var spike_angle := i * TAU / 8.0
+		var direction := Vector2.from_angle(spike_angle)
+		var normal := Vector2(-direction.y, direction.x)
+		var base := direction * 21
+		canvas.draw_colored_polygon(PackedVector2Array([
+			base - normal * 4,
+			direction * HEAVY_HAMMER_HEAD_RADIUS,
+			base + normal * 4,
+		]), color)
+	canvas.draw_circle(Vector2.ZERO, 24, color)
+	canvas.draw_circle(Vector2.ZERO, 19, Color("#27303a"))
+	canvas.draw_arc(Vector2.ZERO, 19, 0, TAU, 32, color.darkened(0.22), 2)
+	for stud_angle in [PI * 0.25, PI * 0.75, PI * 1.25, PI * 1.75]:
+		var stud := Vector2.from_angle(stud_angle) * 10
+		canvas.draw_circle(stud, 2.5, color.darkened(0.12))
+	canvas.draw_circle(Vector2.ZERO, 5, color.darkened(0.28))
 	canvas.draw_set_transform(Vector2.ZERO)

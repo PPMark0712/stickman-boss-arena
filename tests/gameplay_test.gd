@@ -44,6 +44,14 @@ func run() -> void:
 		"Quarry idle keeps the left hand on the forward handle end and hammer behind the head",
 	)
 	check(
+		is_equal_approx(
+			quarry_idle.right_grip.distance_to(quarry_idle.hammer_center),
+			BoxArt.HEAVY_HAMMER_REACH,
+		)
+		and BoxArt.HEAVY_HAMMER_REACH < 80,
+		"Quarry hammer uses the shortened shared weapon reach",
+	)
+	check(
 		quarry_windup.hammer_center.y < quarry_idle.hammer_center.y,
 		"Quarry windup raises the hammer above its idle position",
 	)
@@ -133,6 +141,57 @@ func run() -> void:
 		await frames(2)
 		check(room.player.is_on_floor(), "Player grounded at fight start")
 		check(room.boss.health == room.boss.max_health, "Boss starts at full health")
+		if kind == 0:
+			room.boss.action = "slam"
+			room.boss.set_pose("slam", true)
+			room.boss.pose_time = 0.12
+			room.boss.facing = 1
+			var right_hammer_box := room.boss.hammer_head_hitbox()
+			room.boss.facing = -1
+			var left_hammer_box := room.boss.hammer_head_hitbox()
+			var hitbox_edge := (
+				BoxArt.HEAVY_HAMMER_HEAD_RADIUS
+				* ArenaBoss.HEAVY_VISUAL_SCALE
+				* 2
+			)
+			check(
+				is_equal_approx(
+					right_hammer_box.get_center().x - room.boss.position.x,
+					-(left_hammer_box.get_center().x - room.boss.position.x),
+				)
+				and is_equal_approx(
+					right_hammer_box.get_center().y,
+					left_hammer_box.get_center().y,
+				)
+				and right_hammer_box.size.is_equal_approx(Vector2.ONE * hitbox_edge),
+				"Quarry hammer hitbox mirrors with the rendered spiked head",
+			)
+			room.boss.facing = 1
+			room.player.invulnerable = 0
+			room.player.health = ArenaConfig.MAX_HEALTH
+			room.player.position = right_hammer_box.get_center() + Vector2(0, 35)
+			check(room.boss.hammer_hitbox_active(), "Quarry slam enables its hammer hitbox")
+			room.boss.resolve_hammer_hit()
+			check(
+				room.player.health == ArenaConfig.MAX_HEALTH - 1,
+				"Quarry hammer head collision damages the player",
+			)
+			room.restore_time_scale()
+			room.player.restore_practice_stats()
+			room.player.change_state(ArenaPlayer.State.IDLE)
+			room.player.velocity = Vector2.ZERO
+			room.player.position = Vector2(290, ArenaConfig.FLOOR_Y)
+			room.player.invulnerable = 1000
+			room.boss.action = "combo"
+			room.boss.event_index = 5
+			room.boss.set_pose("attack", true)
+			check(
+				room.boss.hammer_hitbox_active(),
+				"Quarry airborne spin enables its hammer hitbox",
+			)
+			room.boss.action = ""
+			room.boss.set_pose("idle", true)
+			check(not room.boss.hammer_hitbox_active(), "Idle hammer hitbox is harmless")
 		room.spawn_wave(Vector2(640, ArenaConfig.FLOOR_Y), 1, room.boss.color())
 		var cleared_hazard := room.hazards.get_child(
 			room.hazards.get_child_count() - 1

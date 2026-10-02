@@ -17,6 +17,8 @@ const COMBO_LAUNCH := 2.66
 const COMBO_LAUNCH_SPEED := -900.0
 const COMBO_GRAVITY_REDUCTION := 620.0
 const COMBO_MIN_AIR_TIME := 0.55
+const HEAVY_VISUAL_SCALE := 1.65
+const HAMMER_ACTIVE_TIME := 0.24
 
 var arena: Node2D
 var kind := 0
@@ -79,9 +81,10 @@ func _physics_process(delta: float) -> void:
 	tree.tick(delta)
 	move_and_slide()
 	position.x = clampf(position.x, ArenaConfig.LEFT_WALL + 35, ArenaConfig.RIGHT_WALL - 35)
+	resolve_hammer_hit()
 	if not phase_pending and hurtbox().intersects(arena.player.hurtbox()):
 		arena.player.take_damage(1, position)
-	visual.scale = Vector2(facing, 1) * (1.65 if kind == 0 else 1.27)
+	visual.scale = Vector2(facing, 1) * (HEAVY_VISUAL_SCALE if kind == 0 else 1.27)
 	visual.queue_redraw()
 
 func _phase_transition(delta: float) -> ArenaBT.Status:
@@ -187,8 +190,6 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				launch(COMBO_LAUNCH_SPEED)
 			if event_index == 5:
 				set_pose("attack")
-				if action_time < 4.4:
-					arena.strike(Rect2(position + Vector2(-95, -150), Vector2(190, 155)), position)
 				velocity.y -= COMBO_GRAVITY_REDUCTION * delta
 				if (
 					is_on_floor()
@@ -312,6 +313,27 @@ func slam(both: bool, wave: bool, wide: bool = false) -> void:
 		arena.spawn_wave(position + Vector2(facing * 70, 0), facing, color())
 		if both:
 			arena.spawn_wave(position - Vector2(facing * 70, 0), -facing, color())
+
+func hammer_head_center() -> Vector2:
+	var rig := BoxArt.heavy_rig_snapshot(pose, visual_progress(), clock)
+	var local_center: Vector2 = rig.hammer_center
+	return position + Vector2(local_center.x * facing, local_center.y) * HEAVY_VISUAL_SCALE
+
+func hammer_head_hitbox() -> Rect2:
+	var radius := BoxArt.HEAVY_HAMMER_HEAD_RADIUS * HEAVY_VISUAL_SCALE
+	return Rect2(hammer_head_center() - Vector2.ONE * radius, Vector2.ONE * radius * 2)
+
+func hammer_hitbox_active() -> bool:
+	if kind != 0 or dead or phase_pending:
+		return false
+	if pose == "slam":
+		return pose_time <= HAMMER_ACTIVE_TIME
+	return action == "combo" and event_index == 5 and pose == "attack"
+
+func resolve_hammer_hit() -> void:
+	if not hammer_hitbox_active():
+		return
+	arena.strike(hammer_head_hitbox(), hammer_head_center())
 
 func hurtbox() -> Rect2:
 	if kind == 0:
