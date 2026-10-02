@@ -10,15 +10,17 @@ const HAMMER_PHASE_TWO := ["jump", "combo", "rain", "wave"]
 const MIRROR_PHASE_ONE := ["thrust", "boomerang", "dive"]
 const MIRROR_PHASE_TWO := ["thrust", "fan", "dive", "blades"]
 const COMBO_FIRST_SLAM := 0.72
-const COMBO_SECOND_WINDUP := 0.98
-const COMBO_SECOND_SLAM := 1.72
-const COMBO_LAUNCH_WINDUP := 1.98
-const COMBO_LAUNCH := 2.66
-const COMBO_LAUNCH_SPEED := -900.0
-const COMBO_GRAVITY_REDUCTION := 620.0
-const COMBO_MIN_AIR_TIME := 0.55
+const COMBO_SECOND_WINDUP := 0.92
+const COMBO_SECOND_SLAM := 1.48
+const COMBO_LAUNCH_WINDUP := 1.68
+const COMBO_LAUNCH := 2.24
+const COMBO_RECOVER_DURATION := COMBO_SECOND_SLAM - COMBO_SECOND_WINDUP
+const COMBO_LAUNCH_SPEED := -820.0
+const COMBO_APEX_HOLD := 0.24
+const COMBO_DIVE_SPEED := 1080.0
+const COMBO_DIVE_POSE_TIME := 0.16
+const COMBO_FINISH_RADIUS := 185.0
 const HEAVY_VISUAL_SCALE := 1.65
-const HAMMER_ACTIVE_TIME := 0.24
 
 var arena: Node2D
 var kind := 0
@@ -82,7 +84,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	position.x = clampf(position.x, ArenaConfig.LEFT_WALL + 35, ArenaConfig.RIGHT_WALL - 35)
 	resolve_hammer_hit()
-	if not phase_pending and hurtbox().intersects(arena.player.hurtbox()):
+	if hurtbox().intersects(arena.player.hurtbox()):
 		arena.player.take_damage(1, position)
 	visual.scale = Vector2(facing, 1) * (HEAVY_VISUAL_SCALE if kind == 0 else 1.27)
 	visual.queue_redraw()
@@ -180,26 +182,40 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				slam(false, false)
 			if at(COMBO_SECOND_WINDUP, 1):
 				face_player()
-				set_pose("windup", true)
+				set_pose("recover", true)
 			if at(COMBO_SECOND_SLAM, 2):
 				face_player()
 				slam(false, false)
 			if at(COMBO_LAUNCH_WINDUP, 3):
-				set_pose("windup", true)
+				set_pose("recover", true)
 			if at(COMBO_LAUNCH, 4):
 				launch(COMBO_LAUNCH_SPEED)
 			if event_index == 5:
 				set_pose("attack")
-				velocity.y -= COMBO_GRAVITY_REDUCTION * delta
-				if (
-					is_on_floor()
-					and action_time > COMBO_LAUNCH + COMBO_MIN_AIR_TIME
-				):
+				if velocity.y >= -15.0:
 					event_index = 6
+					velocity = Vector2.ZERO
+					target_x = clampf(arena.player.position.x, 100, 1180)
+					set_pose("apex", true)
+			if event_index == 6:
+				velocity = Vector2.ZERO
+				if pose_time >= COMBO_APEX_HOLD:
+					event_index = 7
+					face_player()
+					target_x = clampf(arena.player.position.x, 100, 1180)
+					velocity = Vector2(
+						clampf((target_x - position.x) * 3.0, -520, 520),
+						COMBO_DIVE_SPEED,
+					)
+					set_pose("dive", true)
+			if event_index == 7:
+				set_pose("dive")
+				if is_on_floor() and pose_time > 0.08:
+					event_index = 8
 					velocity.x = 0
-					slam(true, true, true)
+					combo_finisher()
 					action_time = 0
-			return event_index == 6 and action_time > 0.65
+			return event_index == 8 and action_time > 0.58
 		"rain":
 			for i in 4:
 				if at(0.60 + i * 0.46, i):
@@ -314,6 +330,21 @@ func slam(both: bool, wave: bool, wide: bool = false) -> void:
 		if both:
 			arena.spawn_wave(position - Vector2(facing * 70, 0), -facing, color())
 
+func combo_finisher() -> void:
+	set_pose("impact", true)
+	var rect := Rect2(
+		position + Vector2(-COMBO_FINISH_RADIUS, -112),
+		Vector2(COMBO_FINISH_RADIUS * 2.0, 112),
+	)
+	arena.strike(rect, position)
+	arena.show_slam(rect, ArenaConfig.DANGER)
+	arena.show_shock(position + Vector2(0, -3), ArenaConfig.DANGER, COMBO_FINISH_RADIUS)
+	arena.burst(position + Vector2(0, -8), ArenaConfig.DANGER, 46)
+	arena.impact(14, 0.07)
+	arena.sound("slam")
+	arena.spawn_wave(position + Vector2(-70, 0), -1, ArenaConfig.DANGER)
+	arena.spawn_wave(position + Vector2(70, 0), 1, ArenaConfig.DANGER)
+
 func hammer_head_center() -> Vector2:
 	var rig := BoxArt.heavy_rig_snapshot(pose, visual_progress(), clock)
 	var local_center: Vector2 = rig.hammer_center
@@ -324,11 +355,7 @@ func hammer_head_hitbox() -> Rect2:
 	return Rect2(hammer_head_center() - Vector2.ONE * radius, Vector2.ONE * radius * 2)
 
 func hammer_hitbox_active() -> bool:
-	if kind != 0 or dead or phase_pending:
-		return false
-	if pose == "slam":
-		return pose_time <= HAMMER_ACTIVE_TIME
-	return action == "combo" and event_index == 5 and pose == "attack"
+	return kind == 0 and not dead
 
 func resolve_hammer_hit() -> void:
 	if not hammer_hitbox_active():
@@ -391,10 +418,18 @@ func visual_progress() -> float:
 		return 0.0
 	if pose == "windup":
 		return clampf(pose_time / windup_duration(), 0.0, 1.0)
+	if pose == "recover":
+		return clampf(pose_time / COMBO_RECOVER_DURATION, 0.0, 1.0)
 	if kind == 0 and pose == "slam":
 		return clampf(pose_time / 0.18, 0.0, 1.0)
 	if pose == "attack" and action == "combo":
-		return fmod(maxf(0.0, action_time - COMBO_LAUNCH) * 1.05, 1.0)
+		return clampf(
+			1.0 - absf(minf(velocity.y, 0.0)) / absf(COMBO_LAUNCH_SPEED),
+			0.0,
+			1.0,
+		)
+	if pose == "dive":
+		return clampf(pose_time / COMBO_DIVE_POSE_TIME, 0.0, 1.0)
 	if pose == "attack" or pose == "slam" or pose == "down":
 		return 0.88
 	return 0.0
@@ -429,6 +464,6 @@ func _draw_fighter() -> void:
 		for i in 6:
 			var point := Vector2(0, -42) + Vector2.from_angle(clock * 19 + i * TAU / 6) * 67
 			BoxArt.bar(visual, point, point + Vector2(9, 9), 4, tint)
-	if pose == "windup" and not phase_pending:
+	if (pose == "windup" or pose == "apex") and not phase_pending:
 		visual.draw_rect(Rect2(-3, -105, 6, 12), ArenaConfig.DANGER)
 		visual.draw_rect(Rect2(-3, -89, 6, 4), ArenaConfig.DANGER)

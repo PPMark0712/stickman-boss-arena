@@ -57,9 +57,9 @@ func _ready() -> void:
 	collision_mask = 1
 	var collider := CollisionShape2D.new()
 	var shape := RectangleShape2D.new()
-	shape.size = Vector2(24, 70)
+	shape.size = Vector2(24, ArenaConfig.PLAYER_HEIGHT)
 	collider.shape = shape
-	collider.position.y = -35
+	collider.position.y = -ArenaConfig.PLAYER_HEIGHT * 0.5
 	add_child(collider)
 	visual = Node2D.new()
 	visual.draw.connect(_draw_fighter)
@@ -163,6 +163,15 @@ func step(delta: float, controls: Controls) -> void:
 				change_state(next)
 	var impact_speed := velocity.y
 	move_and_slide()
+	var jump_ceiling := ArenaConfig.FLOOR_Y - ArenaConfig.PLAYER_MAX_JUMP_HEIGHT
+	if (
+		jumps_used > 0
+		and state != State.HURT
+		and state != State.DEAD
+		and position.y < jump_ceiling
+	):
+		position.y = jump_ceiling
+		velocity.y = maxf(0.0, velocity.y)
 	var grounded_now := is_on_floor()
 	if grounded_now and not was_grounded and impact_speed > 250:
 		landing_squash = clampf((impact_speed - 200) / 700.0, 0.35, 1.0)
@@ -434,7 +443,10 @@ func sword_rect() -> Rect2:
 	)
 
 func hurtbox() -> Rect2:
-	return Rect2(position + Vector2(-12, -70), Vector2(24, 70))
+	return Rect2(
+		position + Vector2(-12, -ArenaConfig.PLAYER_HEIGHT),
+		Vector2(24, ArenaConfig.PLAYER_HEIGHT),
+	)
 
 func register_hit(target_id: int) -> bool:
 	if hit_targets.has(target_id):

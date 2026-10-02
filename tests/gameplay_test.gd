@@ -20,23 +20,30 @@ func frames(count: int) -> void:
 func run() -> void:
 	check(
 		ArenaBoss.COMBO_FIRST_SLAM >= 0.70
-		and ArenaBoss.COMBO_SECOND_SLAM - ArenaBoss.COMBO_SECOND_WINDUP >= 0.70,
-		"Both Quarry combo slams have a readable raised-hammer windup",
+		and ArenaBoss.COMBO_SECOND_WINDUP - ArenaBoss.COMBO_FIRST_SLAM >= 0.18
+		and ArenaBoss.COMBO_SECOND_SLAM - ArenaBoss.COMBO_SECOND_WINDUP >= 0.50,
+		"Quarry links the first impact directly into a readable second raise",
 	)
 	check(
-		ArenaBoss.COMBO_SECOND_WINDUP - ArenaBoss.COMBO_FIRST_SLAM >= 0.24
-		and ArenaBoss.COMBO_LAUNCH_WINDUP - ArenaBoss.COMBO_SECOND_SLAM >= 0.24,
-		"Quarry combo pauses after each ground impact",
+		ArenaBoss.COMBO_LAUNCH_WINDUP - ArenaBoss.COMBO_SECOND_SLAM >= 0.18
+		and is_equal_approx(
+			ArenaBoss.COMBO_LAUNCH - ArenaBoss.COMBO_LAUNCH_WINDUP,
+			ArenaBoss.COMBO_RECOVER_DURATION,
+		),
+		"Quarry flows from the second impact into the launch raise",
 	)
 	check(
-		ArenaBoss.COMBO_LAUNCH - ArenaBoss.COMBO_LAUNCH_WINDUP >= 0.65
-		and ArenaBoss.COMBO_GRAVITY_REDUCTION > 0
-		and ArenaBoss.COMBO_MIN_AIR_TIME >= 0.5,
-		"Quarry combo has a full launch windup and slower airborne finish",
+		ArenaBoss.COMBO_APEX_HOLD >= 0.2
+		and ArenaBoss.COMBO_DIVE_SPEED > absf(ArenaBoss.COMBO_LAUNCH_SPEED),
+		"Quarry holds the overhead warning at the apex before a faster dive",
 	)
 	var quarry_idle: Dictionary = BoxArt.heavy_rig_snapshot("idle", 0.0)
 	var quarry_windup: Dictionary = BoxArt.heavy_rig_snapshot("windup", 1.0)
 	var quarry_impact: Dictionary = BoxArt.heavy_rig_snapshot("slam", 1.0)
+	var quarry_recover_start: Dictionary = BoxArt.heavy_rig_snapshot("recover", 0.0)
+	var quarry_recover_end: Dictionary = BoxArt.heavy_rig_snapshot("recover", 1.0)
+	var quarry_spin_start: Dictionary = BoxArt.heavy_rig_snapshot("attack", 0.0)
+	var quarry_spin_end: Dictionary = BoxArt.heavy_rig_snapshot("attack", 1.0)
 	check(
 		quarry_idle.left_grip.x > quarry_idle.right_grip.x
 		and quarry_idle.hammer_center.x < quarry_idle.right_grip.x
@@ -60,6 +67,13 @@ func run() -> void:
 		and quarry_impact.hammer_center.y > quarry_impact.right_grip.y,
 		"Quarry impact drives the hammer forward and down",
 	)
+	check(
+		quarry_recover_start.hammer_center.is_equal_approx(quarry_impact.hammer_center)
+		and quarry_recover_end.hammer_center.is_equal_approx(quarry_windup.hammer_center)
+		and quarry_recover_end.hammer_center.is_equal_approx(quarry_spin_start.hammer_center)
+		and quarry_spin_start.hammer_center.is_equal_approx(quarry_spin_end.hammer_center),
+		"Quarry combo transitions preserve hammer continuity at impact, raise, and apex",
+	)
 	for arm in ["left", "right"]:
 		var shoulder: Vector2 = quarry_idle["%s_shoulder" % arm]
 		var elbow: Vector2 = quarry_idle["%s_elbow" % arm]
@@ -74,7 +88,10 @@ func run() -> void:
 		and quarry_idle.right_elbow.y > quarry_idle.right_grip.y,
 		"Quarry right elbow bends forward and down from the shoulder grip",
 	)
-	for heavy_pose in ["idle", "run", "windup", "slam", "attack", "air", "hurt"]:
+	for heavy_pose in [
+		"idle", "run", "windup", "slam", "recover", "attack", "apex",
+		"dive", "impact", "air", "hurt",
+	]:
 		for sample in [0.0, 0.5, 1.0]:
 			var snapshot: Dictionary = BoxArt.heavy_rig_snapshot(heavy_pose, sample)
 			for arm in ["left", "right"]:
@@ -191,11 +208,60 @@ func run() -> void:
 			)
 			room.boss.action = ""
 			room.boss.set_pose("idle", true)
-			check(not room.boss.hammer_hitbox_active(), "Idle hammer hitbox is harmless")
+			check(room.boss.hammer_hitbox_active(), "Quarry hammer remains dangerous while idle")
+			room.player.invulnerable = 0
+			room.player.health = ArenaConfig.MAX_HEALTH
+			room.player.position = (
+				room.boss.hammer_head_hitbox().get_center()
+				+ Vector2(0, 35)
+			)
+			room.boss.resolve_hammer_hit()
+			check(
+				room.player.health == ArenaConfig.MAX_HEALTH - 1,
+				"Idle Quarry hammer contact damages the player",
+			)
+			room.restore_time_scale()
+			room.player.restore_practice_stats()
+			room.player.change_state(ArenaPlayer.State.IDLE)
+			room.player.position = Vector2(290, ArenaConfig.FLOOR_Y)
+			room.player.velocity = Vector2.ZERO
+			room.player.invulnerable = 1000
+			var rock := room.new_hazard(
+				"rock",
+				room.player.position + Vector2(0, -96),
+				room.boss.color(),
+			)
+			rock.warning = 0
+			rock.age = 0.1
+			rock.size = Vector2(42, 42)
+			room.player.attack_direction = Vector2.UP
+			rock.position = (
+				room.player.sword_rect().get_center()
+				+ Vector2(0, rock.size.y * 0.5)
+			)
+			room.resolve_sword(room.player, room.player.sword_rect())
+			var reflected_y := rock.position.y
+			check(
+				rock.reflected
+				and is_zero_approx(rock.velocity.x)
+				and rock.velocity.y == -ArenaHazard.ROCK_REFLECT_SPEED,
+				"Upward slash reflects a rock straight upward",
+			)
+			await frames(3)
+			check(
+				rock.position.y < reflected_y
+				and rock.velocity.y == -ArenaHazard.ROCK_REFLECT_SPEED,
+				"Reflected rock keeps flying vertically out of the arena",
+			)
 		room.spawn_wave(Vector2(640, ArenaConfig.FLOOR_Y), 1, room.boss.color())
 		var cleared_hazard := room.hazards.get_child(
 			room.hazards.get_child_count() - 1
 		) as ArenaHazard
+		check(
+			cleared_hazard.size.y > ArenaConfig.PLAYER_HEIGHT
+			and ArenaHazard.WAVE_MAX_HEIGHT == 78.0,
+			"Ground wave is slightly taller than the player",
+		)
 		room.clear_hazards()
 		check(
 			not cleared_hazard.active
@@ -310,18 +376,41 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	room.boss.cooldown = 0
 	room.boss.begin_attack(attack)
 	var ticks := 0
-	var combo_air_ticks := 0
+	var combo_ascent_spin_ticks := 0
+	var combo_descent_spin_ticks := 0
+	var combo_apex_ticks := 0
+	var combo_dive_ticks := 0
+	var combo_shock_seen := false
+	var waves_before: int = room.attacks_spawned.wave
 	while not room.boss.action.is_empty() and ticks < 1100:
 		await physics_frame
 		ticks += 1
-		if (
-			attack == "combo"
-			and room.boss.event_index == 5
-			and not room.boss.is_on_floor()
-		):
-			combo_air_ticks += 1
+		if attack == "combo":
+			if room.boss.event_index == 5:
+				if room.boss.velocity.y < 0:
+					combo_ascent_spin_ticks += 1
+				else:
+					combo_descent_spin_ticks += 1
+			elif room.boss.event_index == 6:
+				combo_apex_ticks += 1
+			elif room.boss.event_index == 7:
+				combo_dive_ticks += 1
+			combo_shock_seen = combo_shock_seen or not room.shocks.is_empty()
 	check(ticks < 1100, "Attack completes: %d / %s" % [room.kind, attack])
 	check(room.boss.position.y <= ArenaConfig.FLOOR_Y + 1, "Boss stays above floor: " + attack)
 	if attack == "combo":
-		check(combo_air_ticks >= 60, "Quarry combo keeps a readable airborne spin")
+		check(
+			combo_ascent_spin_ticks >= 35 and combo_descent_spin_ticks == 0,
+			"Quarry spins only while ascending",
+		)
+		check(combo_apex_ticks >= 20, "Quarry holds the raised hammer at the apex")
+		check(
+			combo_dive_ticks >= 8 and combo_dive_ticks <= 30,
+			"Quarry uses a distinct fast non-spinning descent",
+		)
+		check(
+			combo_shock_seen
+			and room.attacks_spawned.wave - waves_before == 2,
+			"Quarry finisher creates a red shock effect and two ground waves",
+		)
 	room.boss.cooldown = 1000

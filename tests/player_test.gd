@@ -141,6 +141,38 @@ func run() -> void:
 	var before := player.velocity.y
 	player.step(1.0 / 120, controls({"jump": true}))
 	check(player.jumps_used == 2 and player.velocity.y > before, "No third jump")
+	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
+	player.velocity = Vector2(0, 80)
+	player.change_state(ArenaPlayer.State.IDLE)
+	for i in 3:
+		player.step(1.0 / 120, idle)
+	player.step(1.0 / 120, controls({"jump": true}))
+	var single_jump_apex := player.position.y
+	for i in 140:
+		player.step(1.0 / 120, idle)
+		single_jump_apex = minf(single_jump_apex, player.position.y)
+	check(
+		ArenaConfig.FLOOR_Y - single_jump_apex <= ArenaConfig.PLAYER_MAX_JUMP_HEIGHT,
+		"Single jump stays below the configured 1.8-body ceiling",
+	)
+	player.position = Vector2(400, ArenaConfig.FLOOR_Y - 1)
+	player.velocity = Vector2(0, 80)
+	player.change_state(ArenaPlayer.State.IDLE)
+	for i in 3:
+		player.step(1.0 / 120, idle)
+	player.step(1.0 / 120, controls({"jump": true}))
+	var double_jump_apex := player.position.y
+	for i in 140:
+		var jump_again := controls({"jump": true}) if i == 20 else idle
+		player.step(1.0 / 120, jump_again)
+		double_jump_apex = minf(double_jump_apex, player.position.y)
+	check(
+		is_equal_approx(
+			ArenaConfig.FLOOR_Y - double_jump_apex,
+			ArenaConfig.PLAYER_MAX_JUMP_HEIGHT,
+		),
+		"Double jump reaches but does not exceed the 1.8-body ceiling",
+	)
 	player.step(1.0 / 120, controls({"axis": 1.0, "attack": true}))
 	check(
 		player.state == ArenaPlayer.State.ATTACK

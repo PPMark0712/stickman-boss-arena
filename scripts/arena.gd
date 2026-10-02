@@ -33,6 +33,18 @@ class SlamEffect extends RefCounted:
 		rect = area
 		color = tint
 
+class ShockEffect extends RefCounted:
+	var position: Vector2
+	var color: Color
+	var radius: float
+	var life := 0.34
+	var max_life := 0.34
+
+	func _init(origin: Vector2, tint: Color, max_radius: float) -> void:
+		position = origin
+		color = tint
+		radius = max_radius
+
 class SlashEffect extends RefCounted:
 	var position: Vector2
 	var direction: Vector2
@@ -63,6 +75,7 @@ var combat_active := true
 var elapsed := 0.0
 var particles: Array[ParticleEffect] = []
 var slams: Array[SlamEffect] = []
+var shocks: Array[ShockEffect] = []
 var slashes: Array[SlashEffect] = []
 var shake := 0.0
 var hitstop := 0.0
@@ -131,6 +144,10 @@ func _process(delta: float) -> void:
 		slams[i].life -= delta
 		if slams[i].life <= 0:
 			slams.remove_at(i)
+	for i in range(shocks.size() - 1, -1, -1):
+		shocks[i].life -= real_delta
+		if shocks[i].life <= 0:
+			shocks.remove_at(i)
 	for i in range(slashes.size() - 1, -1, -1):
 		slashes[i].life -= real_delta
 		if slashes[i].life <= 0:
@@ -140,6 +157,19 @@ func _process(delta: float) -> void:
 	effects.queue_redraw()
 
 func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
+	if source.attack_direction == Vector2.UP:
+		for child in hazards.get_children():
+			var hazard := child as ArenaHazard
+			if (
+				hazard
+				and hazard.can_reflect_upward()
+				and rect.intersects(hazard.hitbox())
+			):
+				hazard.reflect_upward()
+				var contact := hazard.position - Vector2(0, hazard.size.y * 0.5)
+				burst(contact, ArenaConfig.TEAL, 14)
+				sound("hit")
+				impact(3.5, 0.035)
 	if boss.dead or boss.phase_pending or not rect.intersects(boss.hurtbox()):
 		return
 	if source.register_hit(boss.get_instance_id()):
@@ -170,14 +200,14 @@ func spawn_spell(at_position: Vector2, direction: float) -> void:
 func spawn_wave(at_position: Vector2, direction: float, tint: Color) -> void:
 	var projectile := new_hazard("wave", Vector2(at_position.x, ArenaConfig.FLOOR_Y), tint)
 	projectile.velocity.x = direction * (300 if boss.phase == 1 else 370)
-	projectile.size = Vector2(46, 50)
+	projectile.size = Vector2(50, ArenaHazard.WAVE_MAX_HEIGHT)
 	attacks_spawned.wave += 1
 
 func spawn_rock(x: float, delay: float, blade: bool = false) -> void:
 	var projectile := new_hazard("sword_rain" if blade else "rock", Vector2(x, 90), boss.color())
 	projectile.warning = delay
 	projectile.velocity.y = 430
-	projectile.size = Vector2(18, 62) if blade else Vector2(38, 40)
+	projectile.size = Vector2(18, 62) if blade else Vector2(42, 42)
 	attacks_spawned.rock += 1
 
 func spawn_blade(at_position: Vector2, speed: Vector2, returning: bool) -> void:
@@ -215,6 +245,9 @@ func burst(at_position: Vector2, tint: Color, count: int) -> void:
 
 func show_slam(rect: Rect2, tint: Color) -> void:
 	slams.append(SlamEffect.new(rect, tint))
+
+func show_shock(at_position: Vector2, tint: Color, radius: float) -> void:
+	shocks.append(ShockEffect.new(at_position, tint, radius))
 
 func show_slash(
 	origin: Vector2,
@@ -295,6 +328,29 @@ func draw_effects() -> void:
 		var tint: Color = slam_.color
 		tint.a = slam_.life * 2.2
 		effects.draw_rect(slam_.rect, tint)
+	for shock in shocks:
+		var progress := 1.0 - shock.life / shock.max_life
+		var current_radius := lerpf(shock.radius * 0.22, shock.radius, progress)
+		var alpha := (1.0 - progress) * 0.92
+		for band in 3:
+			var radius := current_radius - band * 20.0
+			if radius > 0:
+				effects.draw_arc(
+					shock.position,
+					radius,
+					PI,
+					TAU,
+					40,
+					Color(shock.color, alpha * (1.0 - band * 0.24)),
+					7.0 - band * 1.5,
+				)
+		effects.draw_rect(
+			Rect2(
+				shock.position + Vector2(-current_radius, -3),
+				Vector2(current_radius * 2.0, 4),
+			),
+			Color(shock.color, alpha * 0.72),
+		)
 	for slash in slashes:
 		var alpha: float = slash.life / slash.max_life
 		var reach := 150.0 if absf(slash.direction.x) > 0.5 else 142.0

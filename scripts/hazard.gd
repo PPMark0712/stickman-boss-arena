@@ -1,7 +1,9 @@
 class_name ArenaHazard
 extends Node2D
 
-const WAVE_HEIGHTS := [17, 31, 47, 54, 43, 29, 12]
+const WAVE_HEIGHTS := [24, 43, 64, 78, 69, 47, 25]
+const WAVE_MAX_HEIGHT := 78.0
+const ROCK_REFLECT_SPEED := 1100.0
 
 var arena: Node2D
 var kind := "wave"
@@ -16,6 +18,7 @@ var size := Vector2(42, 50)
 var origin_x := 0.0
 var launch_direction := 0.0
 var active := true
+var reflected := false
 
 func _ready() -> void:
 	origin_x = position.x
@@ -34,7 +37,7 @@ func _physics_process(delta: float) -> void:
 	if falling and age < warning:
 		queue_redraw()
 		return
-	if falling:
+	if falling and not reflected:
 		velocity.y += 1600 * delta
 	if kind == "blade" and returning:
 		velocity.x -= launch_direction * 520 * delta
@@ -50,9 +53,9 @@ func _physics_process(delta: float) -> void:
 				deactivate()
 				return
 	else:
-		if rect.intersects(arena.player.hurtbox()):
+		if not reflected and rect.intersects(arena.player.hurtbox()):
 			arena.player.take_damage(1, position)
-	if falling and position.y >= ArenaConfig.FLOOR_Y:
+	if falling and not reflected and position.y >= ArenaConfig.FLOOR_Y:
 		arena.burst(Vector2(position.x, ArenaConfig.FLOOR_Y), tint, 12)
 		arena.show_slam(Rect2(position.x - 26, ArenaConfig.FLOOR_Y - 12, 52, 12), tint)
 		deactivate()
@@ -73,6 +76,16 @@ func deactivate() -> void:
 func hitbox() -> Rect2:
 	return Rect2(position - Vector2(size.x * 0.5, size.y), size)
 
+func can_reflect_upward() -> bool:
+	return active and kind == "rock" and age >= warning and not reflected
+
+func reflect_upward() -> void:
+	if not can_reflect_upward():
+		return
+	reflected = true
+	velocity = Vector2(0, -ROCK_REFLECT_SPEED)
+	queue_redraw()
+
 func _draw() -> void:
 	match kind:
 		"wave":
@@ -89,15 +102,44 @@ func _draw() -> void:
 			BoxArt.bar(self, -direction * 25 + Vector2(0, -16), direction * 25 + Vector2(0, -16), 6, tint)
 			direction = direction.rotated(PI * 0.5)
 			BoxArt.bar(self, -direction * 12 + Vector2(0, -16), direction * 12 + Vector2(0, -16), 4, tint)
-		"rock", "sword_rain":
+		"rock":
 			if age < warning:
 				var ground := ArenaConfig.FLOOR_Y - position.y
 				draw_rect(Rect2(-size.x * 0.5, ground - 5, size.x, 5), tint)
 				for i in 6:
 					draw_rect(Rect2(-1, ground - 28 - i * 50, 2, 18), Color(tint, 0.18 + age / warning * 0.4))
+				draw_arc(
+					Vector2(0, ground - size.y * 0.5),
+					size.x * 0.5,
+					0,
+					TAU,
+					24,
+					Color(tint, 0.48),
+					2,
+				)
+			else:
+				var center := Vector2(0, -size.y * 0.5)
+				if reflected:
+					for i in 3:
+						draw_rect(
+							Rect2(-4 + i, 5 + i * 13, 8 - i * 2, 10),
+							Color(ArenaConfig.TEAL, 0.42 - i * 0.1),
+						)
+				draw_circle(center, size.x * 0.5, Color("#11161b"))
+				draw_arc(center, size.x * 0.5 - 1, 0, TAU, 28, tint, 3)
+				draw_circle(center + Vector2(-7, -5), 3, tint.darkened(0.2))
+				draw_circle(center + Vector2(6, 6), 2, tint.darkened(0.35))
+		"sword_rain":
+			if age < warning:
+				var ground := ArenaConfig.FLOOR_Y - position.y
+				draw_rect(Rect2(-size.x * 0.5, ground - 5, size.x, 5), tint)
+				for i in 6:
+					draw_rect(
+						Rect2(-1, ground - 28 - i * 50, 2, 18),
+						Color(tint, 0.18 + age / warning * 0.4),
+					)
 				BoxArt.outline(self, Rect2(-17, ground - 33, 34, 27), Color(tint, 0.4), 1)
 			else:
 				draw_rect(Rect2(-size.x * 0.5, -size.y, size.x, size.y), tint.darkened(0.6))
 				BoxArt.outline(self, Rect2(-size.x * 0.5, -size.y, size.x, size.y), tint, 3)
-				if kind == "sword_rain":
-					draw_rect(Rect2(-18, -size.y + 14, 36, 5), tint)
+				draw_rect(Rect2(-18, -size.y + 14, 36, 5), tint)

@@ -516,16 +516,32 @@ static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyP
 				_heavy_key_pose("impact"),
 				_ease_in(progress),
 			)
-		"attack":
-			var spin := _heavy_key_pose("raised")
-			var rotation := progress * TAU
-			spin.body_lean = sin(rotation) * 7.0
-			spin.right_grip = Vector2(25, -30) + Vector2(
-				cos(rotation) * 4.0,
-				sin(rotation) * 5.0,
+		"recover":
+			return _blend_heavy_poses(
+				_heavy_key_pose("impact"),
+				_heavy_key_pose("raised"),
+				_ease_in_out(progress),
 			)
-			spin.hammer_angle = -1.55 + rotation
+		"attack":
+			var spin := _heavy_key_pose("overhead_air")
+			var rotation := progress * TAU
+			spin.body_lean += sin(rotation) * 7.0
+			spin.right_grip += Vector2(
+				sin(rotation) * 4.0,
+				sin(rotation) * 5.0 + sin(progress * PI) * 15.0,
+			)
+			spin.hammer_angle += rotation
 			return spin
+		"apex":
+			return _heavy_key_pose("overhead_air")
+		"dive":
+			return _blend_heavy_poses(
+				_heavy_key_pose("overhead_air"),
+				_heavy_key_pose("impact"),
+				_ease_in(progress),
+			)
+		"impact":
+			return _heavy_key_pose("impact")
 		"air":
 			return _heavy_key_pose("airborne")
 		"hurt":
@@ -549,6 +565,13 @@ static func _heavy_key_pose(name: String) -> HeavyPose:
 			key.right_grip = Vector2(32, -4)
 			key.left_foot = Vector2(-26, -2)
 			key.right_foot = Vector2(25, -2)
+		"overhead_air":
+			key.body_lean = -7.0
+			key.body_lift = -1.0
+			key.hammer_angle = -1.55
+			key.right_grip = Vector2(24, -45)
+			key.left_foot = Vector2(-21, -10)
+			key.right_foot = Vector2(20, -7)
 		"airborne":
 			key.body_lean = 4.0
 			key.body_lift = -6.0
@@ -641,8 +664,11 @@ static func _draw_heavy_hammer(
 	angle: float,
 	color: Color,
 ) -> void:
-	bar(canvas, shaft_start, hammer_center, 7, color.darkened(0.16))
-	bar(canvas, shaft_start, hammer_center, 3, color.darkened(0.34))
+	var metal_black := Color("#080a0d", color.a)
+	var metal_edge := Color("#252c32", color.a)
+	var gold := Color(ArenaConfig.AMBER, color.a)
+	bar(canvas, shaft_start, hammer_center, 8, metal_edge)
+	bar(canvas, shaft_start, hammer_center, 5, metal_black)
 	canvas.draw_set_transform(hammer_center, angle)
 	for i in 8:
 		var spike_angle := i * TAU / 8.0
@@ -653,12 +679,12 @@ static func _draw_heavy_hammer(
 			base - normal * 4,
 			direction * HEAVY_HAMMER_HEAD_RADIUS,
 			base + normal * 4,
-		]), color)
-	canvas.draw_circle(Vector2.ZERO, 24, color)
-	canvas.draw_circle(Vector2.ZERO, 19, Color("#27303a"))
-	canvas.draw_arc(Vector2.ZERO, 19, 0, TAU, 32, color.darkened(0.22), 2)
+		]), gold)
+	canvas.draw_circle(Vector2.ZERO, 24, metal_black)
+	canvas.draw_circle(Vector2.ZERO, 19, Color("#11161b", color.a))
+	canvas.draw_arc(Vector2.ZERO, 20, 0, TAU, 32, metal_edge, 3)
 	for stud_angle in [PI * 0.25, PI * 0.75, PI * 1.25, PI * 1.75]:
 		var stud := Vector2.from_angle(stud_angle) * 10
-		canvas.draw_circle(stud, 2.5, color.darkened(0.12))
-	canvas.draw_circle(Vector2.ZERO, 5, color.darkened(0.28))
+		canvas.draw_circle(stud, 2.5, gold)
+	canvas.draw_circle(Vector2.ZERO, 5, gold)
 	canvas.draw_set_transform(Vector2.ZERO)
