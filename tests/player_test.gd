@@ -260,43 +260,75 @@ func run() -> void:
 		arena.spells == spells_before_dead_zone and player.energy == 3,
 		"Releasing A between 0.1 and 0.3 seconds does nothing",
 	)
-	player.health = 5
+	player.health = 4
+	player.energy = 6
+	player.focus_cancelled = true
+	player.focus_active = false
 	for i in 37:
 		player.step(1.0 / 120, focus_held)
 	check(
 		player.state == ArenaPlayer.State.HEAL
-		and player.focus_energy_spent == 1
-		and player.energy == 2,
-		"Healing starts at 0.3 seconds and consumes its first energy",
+		and player.focus_energy_spent == 0
+		and player.energy == 6,
+		"A fresh first hold clears stale cancellation and starts healing at 0.3 seconds",
 	)
-	for i in 24:
+	for i in 40:
 		player.step(1.0 / 120, focus_held)
 	check(
-		player.focus_energy_spent == 2 and player.energy == 1,
-		"Healing consumes another energy every 0.2 seconds",
+		player.focus_energy_spent == 1 and player.energy == 5,
+		"Healing consumes its first energy after one third of the channel",
+	)
+	for i in 40:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.focus_energy_spent == 2 and player.energy == 4,
+		"Healing consumes one energy per channel third",
 	)
 	player.step(1.0 / 120, controls({"focus_release": true}))
 	check(
 		player.state == ArenaPlayer.State.IDLE
-		and player.health == 5
-		and player.energy == 1,
+		and player.health == 4
+		and player.energy == 4,
 		"Releasing an incomplete heal cancels without refunding energy",
 	)
-	player.energy = 3
-	for i in 109:
+	player.health = 4
+	player.energy = 6
+	for i in 157:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.health == 5
+		and player.energy == 3
+		and player.focus_consumed
+		and player.state == ArenaPlayer.State.HEAL
+		and not player.focus_cancelled,
+		"Holding A for 1.3 seconds heals once and starts the next cycle",
+	)
+	for i in 157:
 		player.step(1.0 / 120, focus_held)
 	check(
 		player.health == 6
 		and player.energy == 0
-		and player.focus_consumed
-		and player.state == ArenaPlayer.State.IDLE,
-		"Holding A for 0.9 seconds heals one health after three staged costs",
+		and player.state == ArenaPlayer.State.IDLE
+		and player.focus_cancelled,
+		"An uninterrupted hold repeats until health is full or energy is insufficient",
 	)
-	for i in 120:
+	for i in 60:
 		player.step(1.0 / 120, focus_held)
-	check(player.health == 6 and player.energy == 0, "One heal completes per press")
+	check(player.health == 6 and player.energy == 0, "A stopped heal waits for A to be released")
 	player.step(1.0 / 120, controls({"focus_release": true}))
 	check(arena.spells == spells_before_dead_zone, "Healing release does not cast")
+	player.health = 3
+	player.energy = 4
+	for i in 157:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.health == 4
+		and player.energy == 1
+		and player.state == ArenaPlayer.State.IDLE
+		and player.focus_cancelled,
+		"A repeating heal stops before a new cycle when fewer than three energy remain",
+	)
+	player.step(1.0 / 120, controls({"focus_release": true}))
 	player.invulnerable = 0
 	check(player.take_damage(1, Vector2.ZERO), "Damage prepares an interrupted heal case")
 	for i in 40:
@@ -305,16 +337,28 @@ func run() -> void:
 	player.velocity = Vector2.ZERO
 	player.change_state(ArenaPlayer.State.IDLE)
 	player.invulnerable = 0
+	player.health = 4
 	player.energy = 3
-	player.step(1.0 / 120, controls({"focus_release": true}))
-	for i in 61:
+	for i in 85:
 		player.step(1.0 / 120, focus_held)
-	check(player.state == ArenaPlayer.State.HEAL and player.energy == 1, "Heal spends energy before interruption")
+	check(
+		player.state == ArenaPlayer.State.HEAL and player.energy == 2,
+		"Heal spends energy before interruption",
+	)
 	check(player.take_damage(1, Vector2.ZERO), "Damage interrupts healing")
 	check(
-		player.state == ArenaPlayer.State.HURT and player.energy == 1,
+		player.state == ArenaPlayer.State.HURT and player.energy == 2,
 		"Interrupted healing does not refund consumed energy",
 	)
+	for i in 50:
+		player.step(1.0 / 120, focus_held)
+	check(
+		player.health == 3
+		and player.energy == 2
+		and player.focus_cancelled,
+		"Holding A after damage cannot silently restart an interrupted heal",
+	)
+	player.step(1.0 / 120, controls({"focus_release": true}))
 	player.invulnerable = 0
 	player.take_damage(99, Vector2.ZERO)
 	check(player.state == ArenaPlayer.State.DEAD and player.health == 0, "Death state clamps health")

@@ -43,6 +43,7 @@ var focus_time := 0.0
 var focus_energy_spent := 0
 var focus_consumed := false
 var focus_cancelled := false
+var focus_active := false
 var landing_squash := 0.0
 var turn_dust_cooldown := 0.0
 var was_grounded := false
@@ -122,13 +123,13 @@ func step(delta: float, controls: Controls) -> void:
 		visual.queue_redraw()
 		return
 	if state == State.HURT:
-		if controls.focus_release:
+		if controls.focus_release or (focus_active and not controls.focus):
 			reset_focus()
 		velocity.x = move_toward(velocity.x, 0, 1100 * delta)
 		if state_time >= 0.24:
 			change_state(State.IDLE if is_on_floor() else State.AIR)
 	elif state == State.DASH:
-		if controls.focus_release:
+		if controls.focus_release or (focus_active and not controls.focus):
 			reset_focus()
 		velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
 		if state_time >= ArenaConfig.DASH_DURATION:
@@ -231,9 +232,10 @@ func begin_dash(controls: Controls) -> bool:
 	attack_buffer = 0
 	attack_queued = false
 	hit_recoil_time = 0
-	focus_cancelled = true
-	focus_time = 0
-	focus_energy_spent = 0
+	if controls.focus or focus_active:
+		stop_focus_hold()
+	else:
+		reset_focus()
 	dash_cooldown = ArenaConfig.DASH_COOLDOWN
 	velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
 	change_state(State.DASH, true)
@@ -302,9 +304,11 @@ func attack_world_direction() -> Vector2:
 	return Vector2(facing, 0)
 
 func handle_focus(delta: float, controls: Controls) -> void:
-	if controls.focus_release:
+	if controls.focus_release or not controls.focus:
 		if (
-			focus_time > 0
+			controls.focus_release
+			and focus_active
+			and focus_time > 0
 			and focus_time <= ArenaConfig.FOCUS_TAP_TIME
 			and not focus_consumed
 			and not focus_cancelled
@@ -314,8 +318,9 @@ func handle_focus(delta: float, controls: Controls) -> void:
 			change_state(State.IDLE)
 		reset_focus()
 		return
-	if not controls.focus:
-		return
+	if not focus_active:
+		reset_focus()
+		focus_active = true
 	if (
 		state == State.ATTACK
 		or state == State.CAST
@@ -323,35 +328,35 @@ func handle_focus(delta: float, controls: Controls) -> void:
 		or state == State.HURT
 		or state == State.DEAD
 	):
-		focus_cancelled = true
+		stop_focus_hold()
 		return
-	if focus_cancelled or focus_consumed:
+	if focus_cancelled:
 		return
 	focus_time += delta
 	if focus_time < ArenaConfig.HEAL_START_TIME:
 		return
 	if state != State.HEAL:
 		if health >= ArenaConfig.MAX_HEALTH:
-			arena.notify("生命已满 · 短按 A 释放法术")
-			focus_cancelled = true
+			stop_focus_hold("生命已满 · 短按 A 释放法术")
 			return
 		if not is_on_floor():
-			arena.notify("落地后长按 A 回血")
-			focus_cancelled = true
+			stop_focus_hold("落地后长按 A 回血")
 			return
+		if energy < ArenaConfig.ENERGY_COST:
+			stop_focus_hold("需要 3 格能量 · 挥剑命中可积攒")
+			return
+		focus_consumed = true
 		change_state(State.HEAL)
 	while (
 		focus_energy_spent < ArenaConfig.ENERGY_COST
 		and focus_time
 		>= (
 			ArenaConfig.HEAL_START_TIME
-			+ focus_energy_spent * ArenaConfig.HEAL_DRAIN_INTERVAL
+			+ (focus_energy_spent + 1) * ArenaConfig.HEAL_DRAIN_INTERVAL
 		)
 	):
 		if energy <= 0:
-			arena.notify("能量耗尽 · 已消耗的能量不会返还")
-			focus_cancelled = true
-			change_state(State.IDLE)
+			stop_focus_hold("能量耗尽 · 已消耗的能量不会返还")
 			return
 		energy -= 1
 		focus_energy_spent += 1
@@ -362,16 +367,35 @@ func handle_focus(delta: float, controls: Controls) -> void:
 	):
 		health = mini(health + 1, ArenaConfig.MAX_HEALTH)
 		focus_consumed = true
-		change_state(State.IDLE)
 		arena.burst(position + Vector2(0, -40), ArenaConfig.TEAL, 22)
 		arena.sound("heal")
 		stats_changed.emit()
+		focus_time = 0
+		focus_energy_spent = 0
+		if health >= ArenaConfig.MAX_HEALTH:
+			stop_focus_hold()
+		elif energy < ArenaConfig.ENERGY_COST:
+			stop_focus_hold("能量不足 · 回血循环已停止")
+		else:
+			change_state(State.HEAL, true)
 
 func reset_focus() -> void:
 	focus_time = 0
 	focus_energy_spent = 0
 	focus_consumed = false
 	focus_cancelled = false
+	focus_active = false
+
+func stop_focus_hold(message: String = "") -> void:
+	if not message.is_empty():
+		arena.notify(message)
+	focus_time = 0
+	focus_energy_spent = 0
+	focus_consumed = true
+	focus_cancelled = true
+	focus_active = true
+	if state == State.HEAL:
+		change_state(State.IDLE)
 
 func cast_spell() -> bool:
 	if (
@@ -442,9 +466,10 @@ func take_damage(amount: int, from: Vector2) -> bool:
 	attack_buffer = 0
 	attack_queued = false
 	hit_recoil_time = 0
-	focus_cancelled = true
-	focus_time = 0
-	focus_energy_spent = 0
+	if focus_active:
+		stop_focus_hold()
+	else:
+		reset_focus()
 	velocity = Vector2(330 if position.x >= from.x else -330, -260)
 	change_state(State.HURT if health > 0 else State.DEAD)
 	arena.burst(position + Vector2(0, -40), ArenaConfig.DANGER, 20)

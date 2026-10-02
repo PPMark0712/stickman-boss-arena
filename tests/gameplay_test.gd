@@ -83,6 +83,29 @@ func run() -> void:
 		and (-quarry_idle.hammer_center.x) > (-quarry_idle.right_grip.x),
 		"Quarry hammer stays behind the head in both mirrored directions",
 	)
+	var first_slash_start: Dictionary = BoxArt.player_attack_rig_snapshot(0.15, 0)
+	var first_slash_finish: Dictionary = BoxArt.player_attack_rig_snapshot(0.70, 0)
+	var second_slash_start: Dictionary = BoxArt.player_attack_rig_snapshot(0.15, 1)
+	var second_slash_finish: Dictionary = BoxArt.player_attack_rig_snapshot(0.70, 1)
+	check(
+		first_slash_start.hand.x < first_slash_finish.hand.x
+		and first_slash_start.hand.y < first_slash_finish.hand.y
+		and second_slash_start.hand.x > second_slash_finish.hand.x
+		and second_slash_start.hand.y < second_slash_finish.hand.y,
+		"Player alternates two broad top-to-bottom diagonal sword paths",
+	)
+	for variant in 2:
+		for sample in [0.0, 0.15, 0.35, 0.55, 0.70, 1.0]:
+			var attack_rig: Dictionary = BoxArt.player_attack_rig_snapshot(sample, variant)
+			var upper_arm: Vector2 = attack_rig.elbow - attack_rig.shoulder
+			var lower_arm: Vector2 = attack_rig.hand - attack_rig.elbow
+			check(
+				is_equal_approx(upper_arm.length(), 18.0)
+				and is_equal_approx(lower_arm.length(), 18.0)
+				and upper_arm.cross(lower_arm) < 0,
+				"Player right elbow keeps one natural IK branch in slash %d at %.2f"
+				% [variant, sample],
+			)
 	var game: Node = load("res://scenes/main.tscn").instantiate()
 	root.add_child(game)
 	await frames(3)

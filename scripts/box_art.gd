@@ -145,20 +145,10 @@ static func player_fighter(
 
 	match pose:
 		"attack":
-			var strike := _ease_segment(progress, 0.15, 0.70)
-			var recover := _ease_segment(progress, 0.76, 1.0)
-			var hand_start := Vector2(-10, -11) if variant == 0 else Vector2(-9, 12)
-			var hand_finish := Vector2(19, 10) if variant == 0 else Vector2(19, -10)
-			front_hand = chest + hand_start.lerp(hand_finish, strike)
-			front_hand = front_hand.lerp(chest + Vector2(14, 9), recover)
-			front_elbow = _two_bone_elbow(
-				front_shoulder,
-				front_hand,
-				18,
-				-1 if variant == 0 else 1,
-			)
-			rear_elbow = rear_shoulder + Vector2(-11, 7 if variant == 0 else 10)
-			rear_hand = rear_elbow + Vector2(-9, 8 if variant == 0 else 5)
+			front_hand = _player_attack_hand(chest, progress, variant)
+			front_elbow = _two_bone_elbow(front_shoulder, front_hand, 18, 1)
+			rear_elbow = rear_shoulder + Vector2(-11, 8)
+			rear_hand = rear_elbow + Vector2(-9, 7)
 			sword_angle = _player_sword_angle(pose, progress, variant)
 		"up":
 			var strike := _ease_segment(progress, 0.14, 0.72)
@@ -212,7 +202,16 @@ static func player_fighter(
 	canvas.draw_rect(Rect2(head_center + Vector2(4, -3), Vector2(9, 3)), color)
 	_limb(canvas, front_shoulder, front_elbow, front_hand, 4, color)
 	if pose != "heal":
-		_draw_player_sword(canvas, pose, color, front_hand, sword_angle, progress, variant)
+		_draw_player_sword(
+			canvas,
+			pose,
+			color,
+			chest,
+			front_hand,
+			sword_angle,
+			progress,
+			variant,
+		)
 
 static func _limb(
 	canvas: CanvasItem,
@@ -229,6 +228,17 @@ static func _ease_segment(value: float, start: float, finish: float) -> float:
 	var t := clampf((value - start) / maxf(finish - start, 0.001), 0.0, 1.0)
 	return t * t * (3.0 - 2.0 * t)
 
+static func _player_attack_hand(chest: Vector2, progress: float, variant: int) -> Vector2:
+	var strike := _ease_segment(progress, 0.15, 0.70)
+	var recover := _ease_segment(progress, 0.76, 1.0)
+	var hand_start := Vector2(-15, -17) if variant == 0 else Vector2(22, -17)
+	var hand_control := Vector2(7, -7) if variant == 0 else Vector2(5, -5)
+	var hand_finish := Vector2(24, 14) if variant == 0 else Vector2(-14, 14)
+	var first_half := hand_start.lerp(hand_control, strike)
+	var second_half := hand_control.lerp(hand_finish, strike)
+	var hand := chest + first_half.lerp(second_half, strike)
+	return hand.lerp(chest + Vector2(14, 9), recover)
+
 static func _player_sword_angle(pose: String, progress: float, variant: int) -> float:
 	if pose == "up":
 		if progress < 0.16:
@@ -242,8 +252,8 @@ static func _player_sword_angle(pose: String, progress: float, variant: int) -> 
 		if progress < 0.74:
 			return lerp_angle(-2.10, 1.18, _ease_segment(progress, 0.16, 0.74))
 		return lerp_angle(1.18, -0.45, _ease_segment(progress, 0.74, 1.0))
-	var windup := -2.08 if variant == 0 else 1.78
-	var finish := 0.74 if variant == 0 else -0.96
+	var windup := -2.12 if variant == 0 else -0.78
+	var finish := 0.74 if variant == 0 else 2.30
 	if progress < 0.17:
 		return lerp_angle(-0.62, windup, _ease_segment(progress, 0.0, 0.17))
 	if progress < 0.72:
@@ -254,6 +264,7 @@ static func _draw_player_sword(
 	canvas: CanvasItem,
 	pose: String,
 	color: Color,
+	chest: Vector2,
 	hand: Vector2,
 	angle: float,
 	progress: float,
@@ -263,10 +274,11 @@ static func _draw_player_sword(
 		for i in range(3, 0, -1):
 			var old_progress := maxf(0.0, progress - i * 0.035)
 			var old_angle := _player_sword_angle(pose, old_progress, variant)
-			var old_tip := hand + Vector2.from_angle(old_angle) * 66
+			var old_hand := _player_attack_hand(chest, old_progress, variant)
+			var old_tip := old_hand + Vector2.from_angle(old_angle) * 66
 			bar(
 				canvas,
-				hand,
+				old_hand,
 				old_tip,
 				5.0 - i,
 				Color(ArenaConfig.TEAL, 0.08 + (3 - i) * 0.08),
@@ -454,8 +466,19 @@ static func _draw_heavy_fighter(
 	var left_grip := right_grip - shaft_direction * 34
 	var shaft_start := left_grip - shaft_direction * 5
 	var hammer_center := right_grip + shaft_direction * 80
+	var left_shoulder := body_center + Vector2(8, -15)
+	var right_shoulder := body_center + Vector2(18, -21)
+	var left_elbow := _two_bone_elbow(left_shoulder, left_grip, 27, 1)
+	var right_elbow := _two_bone_elbow(right_shoulder, right_grip, 27, 1)
+	var rear_color := Color(color, color.a * 0.68)
 	if not weapon_in_front:
 		_draw_heavy_hammer(canvas, shaft_start, hammer_center, motion.hammer_angle, color)
+	if weapon_in_front:
+		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, rear_color)
+		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), rear_color)
+	else:
+		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, rear_color)
+		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), rear_color)
 
 	canvas.draw_rect(body_rect, Color("#202a33"))
 	outline(canvas, body_rect, color, 4)
@@ -467,20 +490,12 @@ static func _draw_heavy_fighter(
 
 	if weapon_in_front:
 		_draw_heavy_hammer(canvas, shaft_start, hammer_center, motion.hammer_angle, color)
-	var left_shoulder := body_center + Vector2(8, -15)
-	var right_shoulder := body_center + Vector2(18, -21)
-	var left_elbow := _two_bone_elbow(left_shoulder, left_grip, 27, 1)
-	var right_elbow := _two_bone_elbow(right_shoulder, right_grip, 27, 1)
 	if weapon_in_front:
-		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, Color(color, color.a * 0.72))
 		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, color)
-		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
 		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
 	else:
-		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, Color(color, color.a * 0.82))
-		_limb(canvas, right_shoulder, right_elbow, right_grip, 7, color)
+		_limb(canvas, left_shoulder, left_elbow, left_grip, 7, color)
 		canvas.draw_rect(Rect2(left_grip - Vector2(4, 4), Vector2(8, 8)), color)
-		canvas.draw_rect(Rect2(right_grip - Vector2(4, 4), Vector2(8, 8)), color)
 
 static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyPose:
 	var rest := _heavy_key_pose("rest")
@@ -579,6 +594,17 @@ static func heavy_rig_snapshot(
 		"right_shoulder": right_shoulder,
 		"left_elbow": _two_bone_elbow(left_shoulder, left_grip, 27, 1),
 		"right_elbow": _two_bone_elbow(right_shoulder, right_grip, 27, 1),
+	}
+
+static func player_attack_rig_snapshot(progress: float, variant: int) -> Dictionary:
+	var chest := Vector2(0, -51)
+	var shoulder := chest + Vector2(3, 3)
+	var hand := _player_attack_hand(chest, progress, variant)
+	return {
+		"shoulder": shoulder,
+		"elbow": _two_bone_elbow(shoulder, hand, 18, 1),
+		"hand": hand,
+		"sword_angle": _player_sword_angle("attack", progress, variant),
 	}
 
 static func _ease_in(value: float) -> float:
