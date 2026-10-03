@@ -398,11 +398,38 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	var combo_dive_aimed_at_lock := false
 	var combo_locked_target := 0.0
 	var highest_boss_y := room.boss.position.y
+	var jump_dive_seen := false
+	var jump_dive_started_airborne := false
+	var jump_dive_monotonic := true
+	var jump_last_dive_progress := 0.0
+	var jump_air_dive_progress := 0.0
+	var jump_landing_progress := -1.0
+	var jump_landed_in_impact := false
 	var waves_before: int = room.attacks_spawned.wave
 	while not room.boss.action.is_empty() and ticks < 1100:
 		await physics_frame
 		ticks += 1
 		highest_boss_y = minf(highest_boss_y, room.boss.position.y)
+		if room.kind == 0 and attack == "jump":
+			if room.boss.event_index == 2:
+				var dive_progress := room.boss.visual_progress()
+				jump_dive_seen = true
+				jump_dive_started_airborne = (
+					jump_dive_started_airborne or not room.boss.is_on_floor()
+				)
+				jump_dive_monotonic = (
+					jump_dive_monotonic
+					and dive_progress + 0.001 >= jump_last_dive_progress
+				)
+				jump_last_dive_progress = dive_progress
+				if room.boss.is_on_floor():
+					jump_landing_progress = dive_progress
+				else:
+					jump_air_dive_progress = maxf(jump_air_dive_progress, dive_progress)
+			elif room.boss.event_index == 3:
+				jump_landed_in_impact = (
+					jump_landed_in_impact or room.boss.pose == "impact"
+				)
 		if attack == "combo":
 			if room.boss.event_index == 5:
 				if not combo_target_recorded:
@@ -444,6 +471,15 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 		check(
 			ArenaConfig.FLOOR_Y - highest_boss_y >= minimum_jump_height,
 			"Quarry phase %d jump slam reaches its raised apex" % room.boss.phase,
+		)
+		check(
+			jump_dive_seen
+			and jump_dive_started_airborne
+			and jump_dive_monotonic
+			and jump_air_dive_progress >= 0.75
+			and jump_landing_progress >= 0.99
+			and jump_landed_in_impact,
+			"Quarry completes its downward hammer arc exactly as the jump lands",
 		)
 	if attack == "combo":
 		check(

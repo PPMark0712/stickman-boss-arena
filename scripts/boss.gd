@@ -40,6 +40,7 @@ var action_time := 0.0
 var event_index := 0
 var action_count := 0
 var target_x := 0.0
+var jump_apex_y := ArenaConfig.FLOOR_Y
 var pose := "idle"
 var pose_time := 0.0
 var dead := false
@@ -136,6 +137,7 @@ func begin_attack(name_: String) -> void:
 	action_time = 0
 	event_index = 0
 	target_x = arena.player.position.x
+	jump_apex_y = ArenaConfig.FLOOR_Y
 	if absf(target_x - position.x) > 1:
 		facing = signf(target_x - position.x)
 	velocity.x = 0
@@ -173,16 +175,24 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 					if phase == 1
 					else JUMP_LAUNCH_SPEED_PHASE_TWO
 				)
+				set_pose("apex", true)
 			if event_index == 1:
-				set_pose("windup")
+				set_pose("apex")
+				if velocity.y >= 0:
+					event_index = 2
+					jump_apex_y = position.y
+					set_pose("dive", true)
+			if event_index == 2:
+				set_pose("dive")
 				if velocity.y > 50:
 					velocity.y += 360.0 * delta
-				if is_on_floor() and action_time > 0.65:
-					event_index = 2
+				if is_on_floor():
+					event_index = 3
 					velocity.x = 0
 					slam(phase == 2, phase == 2)
+					set_pose("impact", true)
 					action_time = 0
-			return event_index == 2 and action_time >= 0.50
+			return event_index == 3 and action_time >= 0.50
 		"combo":
 			if at(COMBO_FIRST_SLAM, 0):
 				slam(false, false)
@@ -428,6 +438,13 @@ func visual_progress() -> float:
 	if pose == "attack" and action == "combo":
 		return clampf(
 			1.0 - absf(minf(velocity.y, 0.0)) / absf(COMBO_LAUNCH_SPEED),
+			0.0,
+			1.0,
+		)
+	if pose == "dive" and action == "jump":
+		return clampf(
+			(position.y - jump_apex_y)
+			/ maxf(ArenaConfig.FLOOR_Y - jump_apex_y, 1.0),
 			0.0,
 			1.0,
 		)
