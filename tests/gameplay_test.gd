@@ -387,20 +387,47 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	var combo_apex_ticks := 0
 	var combo_dive_ticks := 0
 	var combo_shock_seen := false
+	var combo_target_recorded := false
+	var combo_target_stayed_locked := true
+	var combo_dive_aimed_at_lock := false
+	var combo_locked_target := 0.0
 	var waves_before: int = room.attacks_spawned.wave
 	while not room.boss.action.is_empty() and ticks < 1100:
 		await physics_frame
 		ticks += 1
 		if attack == "combo":
 			if room.boss.event_index == 5:
+				if not combo_target_recorded:
+					combo_target_recorded = true
+					combo_locked_target = room.boss.target_x
+					room.player.position.x = 1180 if combo_locked_target < 640 else 100
+				else:
+					combo_target_stayed_locked = (
+						combo_target_stayed_locked
+						and is_equal_approx(room.boss.target_x, combo_locked_target)
+					)
 				if room.boss.velocity.y < 0:
 					combo_ascent_spin_ticks += 1
 				else:
 					combo_descent_spin_ticks += 1
 			elif room.boss.event_index == 6:
 				combo_apex_ticks += 1
+				combo_target_stayed_locked = (
+					combo_target_stayed_locked
+					and is_equal_approx(room.boss.target_x, combo_locked_target)
+				)
 			elif room.boss.event_index == 7:
 				combo_dive_ticks += 1
+				combo_target_stayed_locked = (
+					combo_target_stayed_locked
+					and is_equal_approx(room.boss.target_x, combo_locked_target)
+				)
+				var locked_direction := signf(combo_locked_target - room.boss.position.x)
+				combo_dive_aimed_at_lock = (
+					combo_dive_aimed_at_lock
+					or is_zero_approx(locked_direction)
+					or signf(room.boss.velocity.x) == locked_direction
+				)
 			combo_shock_seen = combo_shock_seen or not room.shocks.is_empty()
 	check(ticks < 1100, "Attack completes: %d / %s" % [room.kind, attack])
 	check(room.boss.position.y <= ArenaConfig.FLOOR_Y + 1, "Boss stays above floor: " + attack)
@@ -410,6 +437,12 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 			"Quarry spins only while ascending",
 		)
 		check(combo_apex_ticks >= 20, "Quarry holds the raised hammer at the apex")
+		check(
+			combo_target_recorded
+			and combo_target_stayed_locked
+			and combo_dive_aimed_at_lock,
+			"Quarry dive stays aimed at the player's launch-time position",
+		)
 		check(
 			combo_dive_ticks >= 8 and combo_dive_ticks <= 30,
 			"Quarry uses a distinct fast non-spinning descent",

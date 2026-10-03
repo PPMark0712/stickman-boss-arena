@@ -195,14 +195,11 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				if velocity.y >= -15.0:
 					event_index = 6
 					velocity = Vector2.ZERO
-					target_x = clampf(arena.player.position.x, 100, 1180)
 					set_pose("apex", true)
 			if event_index == 6:
 				velocity = Vector2.ZERO
 				if pose_time >= COMBO_APEX_HOLD:
 					event_index = 7
-					face_player()
-					target_x = clampf(arena.player.position.x, 100, 1180)
 					velocity = Vector2(
 						clampf((target_x - position.x) * 3.0, -520, 520),
 						COMBO_DIVE_SPEED,
