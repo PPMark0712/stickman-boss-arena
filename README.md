@@ -42,7 +42,7 @@ python3 -m http.server 8060 --directory build/web
 ```
 
 浏览器访问 <http://127.0.0.1:8060>。也可运行 `python3 tools/build.py all`
-一次完成导入、237 项玩法检查和 Web 导出。若 Godot 不在系统路径或 macOS
+一次完成导入、241 项玩法检查和 Web 导出。若 Godot 不在系统路径或 macOS
 默认位置，请设置 `GODOT=/path/to/godot`。
 
 ## 项目结构

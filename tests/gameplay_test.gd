@@ -33,7 +33,8 @@ func run() -> void:
 		"Quarry flows from the second impact into the launch raise",
 	)
 	check(
-		ArenaBoss.COMBO_APEX_HOLD >= 0.2
+		ArenaBoss.COMBO_LAUNCH_SPEED <= -900.0
+		and ArenaBoss.COMBO_APEX_HOLD >= 0.3
 		and ArenaBoss.COMBO_DIVE_SPEED > absf(ArenaBoss.COMBO_LAUNCH_SPEED),
 		"Quarry holds the overhead warning at the apex before a faster dive",
 	)
@@ -49,6 +50,11 @@ func run() -> void:
 		and quarry_idle.hammer_center.x < quarry_idle.right_grip.x
 		and quarry_idle.hammer_center.y < quarry_idle.right_grip.y,
 		"Quarry idle keeps the left hand on the forward handle end and hammer behind the head",
+	)
+	check(
+		absf(quarry_idle.hammer_center.y - quarry_idle.head_center.y) <= 2.0
+		and quarry_idle.hammer_angle < -2.75,
+		"Quarry carries the shallow diagonal hammer at head height",
 	)
 	check(
 		is_equal_approx(
@@ -391,10 +397,12 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	var combo_target_stayed_locked := true
 	var combo_dive_aimed_at_lock := false
 	var combo_locked_target := 0.0
+	var highest_boss_y := room.boss.position.y
 	var waves_before: int = room.attacks_spawned.wave
 	while not room.boss.action.is_empty() and ticks < 1100:
 		await physics_frame
 		ticks += 1
+		highest_boss_y = minf(highest_boss_y, room.boss.position.y)
 		if attack == "combo":
 			if room.boss.event_index == 5:
 				if not combo_target_recorded:
@@ -431,7 +439,17 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 			combo_shock_seen = combo_shock_seen or not room.shocks.is_empty()
 	check(ticks < 1100, "Attack completes: %d / %s" % [room.kind, attack])
 	check(room.boss.position.y <= ArenaConfig.FLOOR_Y + 1, "Boss stays above floor: " + attack)
+	if room.kind == 0 and attack == "jump":
+		var minimum_jump_height := 190.0 if room.boss.phase == 1 else 230.0
+		check(
+			ArenaConfig.FLOOR_Y - highest_boss_y >= minimum_jump_height,
+			"Quarry phase %d jump slam reaches its raised apex" % room.boss.phase,
+		)
 	if attack == "combo":
+		check(
+			ArenaConfig.FLOOR_Y - highest_boss_y >= 220.0,
+			"Quarry combo reaches its raised apex",
+		)
 		check(
 			combo_ascent_spin_ticks >= 35 and combo_descent_spin_ticks == 0,
 			"Quarry spins only while ascending",

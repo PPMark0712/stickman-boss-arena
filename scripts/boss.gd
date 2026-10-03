@@ -15,8 +15,10 @@ const COMBO_SECOND_SLAM := 1.48
 const COMBO_LAUNCH_WINDUP := 1.68
 const COMBO_LAUNCH := 2.24
 const COMBO_RECOVER_DURATION := COMBO_SECOND_SLAM - COMBO_SECOND_WINDUP
-const COMBO_LAUNCH_SPEED := -820.0
-const COMBO_APEX_HOLD := 0.24
+const JUMP_LAUNCH_SPEED_PHASE_ONE := -870.0
+const JUMP_LAUNCH_SPEED_PHASE_TWO := -960.0
+const COMBO_LAUNCH_SPEED := -930.0
+const COMBO_APEX_HOLD := 0.30
 const COMBO_DIVE_SPEED := 1080.0
 const COMBO_DIVE_POSE_TIME := 0.16
 const COMBO_FINISH_RADIUS := 185.0
@@ -166,7 +168,11 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 			return action_time >= (1.18 if phase == 1 else 0.92)
 		"jump":
 			if at(windup_duration(), 0):
-				launch(-810 if phase == 1 else -900)
+				launch(
+					JUMP_LAUNCH_SPEED_PHASE_ONE
+					if phase == 1
+					else JUMP_LAUNCH_SPEED_PHASE_TWO
+				)
 			if event_index == 1:
 				set_pose("windup")
 				if velocity.y > 50:

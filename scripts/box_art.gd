@@ -11,8 +11,8 @@ const HEAVY_HAMMER_SILVER_HIGHLIGHT := Color("#edf2f5")
 class HeavyPose extends RefCounted:
 	var body_lean := 0.0
 	var body_lift := 0.0
-	var hammer_angle := -2.22
-	var right_grip := Vector2(27, -28)
+	var hammer_angle := -2.92
+	var right_grip := Vector2(18, -28)
 	var left_foot := Vector2(-17, -2)
 	var right_foot := Vector2(17, -2)
 
@@ -614,8 +614,11 @@ static func heavy_rig_snapshot(
 	var hammer_center := right_grip + shaft_direction * HEAVY_HAMMER_REACH
 	var left_shoulder := body_center + Vector2(8, -15)
 	var right_shoulder := body_center + Vector2(18, -21)
+	var head_center := body_center + Vector2(motion.body_lean * 0.12, -42)
 	return {
 		"body_center": body_center,
+		"head_center": head_center,
+		"hammer_angle": motion.hammer_angle,
 		"hammer_center": hammer_center,
 		"hammer_radius": HEAVY_HAMMER_HEAD_RADIUS,
 		"left_grip": left_grip,
