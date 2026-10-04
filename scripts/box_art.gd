@@ -95,7 +95,17 @@ static func player_fighter(
 	variant: int = 0,
 	squash: float = 0.0,
 	airborne: bool = false,
+	rig_override: Dictionary = {},
+	vertical_velocity: float = 0.0,
 ) -> void:
+	var rig := rig_override if not rig_override.is_empty() else player_rig(pose, clock, progress, variant, squash, airborne, vertical_velocity)
+	_draw_player_rig(canvas, rig, pose, color, progress, variant)
+
+static func player_rig(
+	pose: String, clock: float, progress: float, variant: int,
+	squash: float, airborne: bool,
+	vertical_velocity: float = 0.0,
+) -> Dictionary:
 	progress = clampf(progress, 0.0, 1.0)
 	squash = clampf(squash, 0.0, 1.0)
 	var gait := clock * 14.0
@@ -121,11 +131,12 @@ static func player_fighter(
 		chest += Vector2(2, 5)
 		head_center += Vector2(5, 7)
 
-	var left_foot := Vector2(-12 + stride * 14, -2 - maxf(0, cos(gait)) * 5)
-	var right_foot := Vector2(12 - stride * 14, -2 - maxf(0, -cos(gait)) * 5)
+	var left_foot := Vector2(-12 + stride * 14, -2 - (maxf(0, cos(gait)) * 5 if pose == "run" else 0.0))
+	var right_foot := Vector2(12 - stride * 14, -2 - (maxf(0, -cos(gait)) * 5 if pose == "run" else 0.0))
 	if pose == "air" or airborne:
-		left_foot = Vector2(-15, -13)
-		right_foot = Vector2(17, -8)
+		var falling := smoothstep(-60.0, 600.0, vertical_velocity)
+		left_foot = Vector2(-15, -13).lerp(Vector2(-10, -3), falling)
+		right_foot = Vector2(17, -8).lerp(Vector2(12, -1), falling)
 	if pose == "dash":
 		left_foot = Vector2(-24, -5)
 		right_foot = Vector2(5, -2)
@@ -198,6 +209,30 @@ static func player_fighter(
 			front_hand = front_elbow + Vector2(7, 8)
 			sword_angle = 0.75
 
+	return {
+		"hip": hip, "chest": chest, "head_center": head_center,
+		"left_foot": left_foot, "right_foot": right_foot,
+		"left_knee": left_knee, "right_knee": right_knee,
+		"rear_shoulder": rear_shoulder, "front_shoulder": front_shoulder,
+		"rear_elbow": rear_elbow, "rear_hand": rear_hand,
+		"front_elbow": front_elbow, "front_hand": front_hand, "sword_angle": sword_angle,
+	}
+
+static func _draw_player_rig(canvas: CanvasItem, rig: Dictionary, pose: String, color: Color, progress: float, variant: int) -> void:
+	var hip: Vector2 = rig.hip
+	var chest: Vector2 = rig.chest
+	var head_center: Vector2 = rig.head_center
+	var left_foot: Vector2 = rig.left_foot
+	var right_foot: Vector2 = rig.right_foot
+	var left_knee: Vector2 = rig.left_knee
+	var right_knee: Vector2 = rig.right_knee
+	var rear_shoulder: Vector2 = rig.rear_shoulder
+	var front_shoulder: Vector2 = rig.front_shoulder
+	var rear_elbow: Vector2 = rig.rear_elbow
+	var rear_hand: Vector2 = rig.rear_hand
+	var front_elbow: Vector2 = rig.front_elbow
+	var front_hand: Vector2 = rig.front_hand
+	var sword_angle: float = rig.sword_angle
 	_limb(canvas, hip + Vector2(-3, 0), left_knee, left_foot, 5, Color(color, color.a * 0.78))
 	_limb(canvas, hip + Vector2(3, 0), right_knee, right_foot, 5, color)
 	_limb(canvas, rear_shoulder, rear_elbow, rear_hand, 4, Color(color, color.a * 0.68))
@@ -242,7 +277,7 @@ static func _player_attack_hand(chest: Vector2, progress: float, variant: int) -
 	var hand_finish := Vector2(24, 14) if variant == 0 else Vector2(-14, 14)
 	var first_half := hand_start.lerp(hand_control, strike)
 	var second_half := hand_control.lerp(hand_finish, strike)
-	var hand := chest + first_half.lerp(second_half, strike)
+	var hand := chest + Vector2(17, 22).lerp(first_half.lerp(second_half, strike), _ease_segment(progress, 0.0, 0.15))
 	return hand.lerp(chest + Vector2(14, 9), recover)
 
 static func _player_sword_angle(pose: String, progress: float, variant: int) -> float:
@@ -276,7 +311,7 @@ static func _draw_player_sword(
 	progress: float,
 	variant: int,
 ) -> void:
-	if pose == "attack":
+	if pose == "attack" and progress >= 0.15 and progress <= 0.74:
 		for i in range(3, 0, -1):
 			var old_progress := maxf(0.0, progress - i * 0.035)
 			var old_angle := _player_sword_angle(pose, old_progress, variant)
@@ -289,7 +324,7 @@ static func _draw_player_sword(
 				5.0 - i,
 				Color(ArenaConfig.TEAL, 0.08 + (3 - i) * 0.08),
 			)
-	elif pose == "up" or pose == "down":
+	elif (pose == "up" or pose == "down") and progress >= 0.14 and progress <= 0.74:
 		for i in range(3, 0, -1):
 			var old_progress := maxf(0.0, progress - i * 0.035)
 			var old_angle := _player_sword_angle(pose, old_progress, variant)
@@ -545,6 +580,12 @@ static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyP
 			)
 		"impact":
 			return _heavy_key_pose("impact")
+		"settle":
+			# Lift in front of the body before carrying the hammer behind the head.
+			# A shortest-angle blend straight to rest would sweep through the floor.
+			if progress < 0.62:
+				return _blend_heavy_poses(_heavy_key_pose("impact"), _heavy_key_pose("raised"), _ease_in_out(progress / 0.62))
+			return _blend_heavy_poses(_heavy_key_pose("raised"), rest, _ease_in_out((progress - 0.62) / 0.38))
 		"air":
 			return _heavy_key_pose("airborne")
 		"hurt":
@@ -565,7 +606,8 @@ static func _heavy_key_pose(name: String) -> HeavyPose:
 			key.body_lean = 12.0
 			key.body_lift = 3.0
 			key.hammer_angle = 0.78
-			key.right_grip = Vector2(32, -4)
+			# The head radius rests on the floor instead of burying the hammer.
+			key.right_grip = Vector2(32, -30)
 			key.left_foot = Vector2(-26, -2)
 			key.right_foot = Vector2(25, -2)
 		"overhead_air":
@@ -607,7 +649,8 @@ static func heavy_rig_snapshot(
 	clock: float = 0.0,
 ) -> Dictionary:
 	var motion := _heavy_motion(pose, progress, clock)
-	var body_center := Vector2(motion.body_lean * 0.35, -48 + motion.body_lift)
+	var bounce := absf(cos(clock * 8.5)) * 1.2 if pose == "run" else sin(clock * 2.4) * 0.45
+	var body_center := Vector2(motion.body_lean * 0.35, -48 + motion.body_lift + bounce)
 	var shaft_direction := Vector2.from_angle(motion.hammer_angle)
 	var right_grip := body_center + motion.right_grip
 	var left_grip := right_grip - shaft_direction * 34

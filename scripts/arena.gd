@@ -67,6 +67,21 @@ class SlashEffect extends RefCounted:
 		life = duration
 		max_life = duration
 
+class MotionEcho extends RefCounted:
+	var origin := Vector2.ZERO
+	var facing := 1.0
+	var rig: Dictionary = {}
+	var life := 0.13
+
+class ContactSpark extends RefCounted:
+	var origin := Vector2.ZERO
+	var direction := Vector2.RIGHT
+	var life := 0.13
+
+class HammerTrace extends RefCounted:
+	var point := Vector2.ZERO
+	var life := 0.12
+
 var kind := 0
 var practice := false
 var player: ArenaPlayer
@@ -77,6 +92,11 @@ var particles: Array[ParticleEffect] = []
 var slams: Array[SlamEffect] = []
 var shocks: Array[ShockEffect] = []
 var slashes: Array[SlashEffect] = []
+var echoes: Array[MotionEcho] = []
+var sparks: Array[ContactSpark] = []
+var hammer_traces: Array[HammerTrace] = []
+var echo_timer := 0.0
+var feedback_clock := 0.0
 var shake := 0.0
 var hitstop := 0.0
 var previous_time_scale := 1.0
@@ -125,6 +145,7 @@ func make_wall(center: Vector2, size: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	var real_delta := delta / maxf(Engine.time_scale, 0.001)
+	feedback_clock += real_delta
 	if hitstop > 0:
 		hitstop -= real_delta
 		if hitstop <= 0:
@@ -149,11 +170,38 @@ func _process(delta: float) -> void:
 		if shocks[i].life <= 0:
 			shocks.remove_at(i)
 	for i in range(slashes.size() - 1, -1, -1):
-		slashes[i].life -= real_delta
+		slashes[i].life -= delta
 		if slashes[i].life <= 0:
 			slashes.remove_at(i)
-	shake = maxf(0, shake - real_delta * 25)
-	position = Vector2(rng.randf_range(-shake, shake), rng.randf_range(-shake, shake) * 0.6)
+	for i in range(echoes.size() - 1, -1, -1):
+		echoes[i].life -= delta
+		if echoes[i].life <= 0:
+			echoes.remove_at(i)
+	for i in range(sparks.size() - 1, -1, -1):
+		sparks[i].life -= real_delta
+		if sparks[i].life <= 0:
+			sparks.remove_at(i)
+	for i in range(hammer_traces.size() - 1, -1, -1):
+		hammer_traces[i].life -= delta
+		if hammer_traces[i].life <= 0:
+			hammer_traces.remove_at(i)
+	echo_timer -= delta
+	if combat_active and echo_timer <= 0:
+		echo_timer = 0.022
+		if player.state == ArenaPlayer.State.DASH and echoes.size() < 8:
+			var echo := MotionEcho.new()
+			echo.origin = player.position
+			echo.facing = player.facing
+			echo.rig = player.visual.blended_rig.duplicate()
+			echoes.append(echo)
+		if kind == 0 and not boss.dead and boss.pose in ["slam", "dive", "attack"]:
+			var trace := HammerTrace.new()
+			trace.point = boss.hammer_head_center()
+			hammer_traces.append(trace)
+	shake *= exp(-real_delta * 18.0)
+	if shake < 0.05:
+		shake = 0
+	position = Vector2(sin(feedback_clock * 103.0), sin(feedback_clock * 137.0) * 0.55) * shake
 	effects.queue_redraw()
 
 func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
@@ -174,17 +222,16 @@ func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
 		return
 	if source.register_hit(boss.get_instance_id()):
 		boss.take_damage(ArenaConfig.SWORD_DAMAGE, source.position)
-		var contact := rect.get_center().lerp(boss.position + Vector2(0, -60), 0.58)
-		burst(contact, Color.WHITE, 17)
-		show_slash(
-			contact,
-			source.attack_world_direction(),
-			source.attack_variant,
-			ArenaConfig.INK,
-			0.10,
-		)
+		var contact := rect.intersection(boss.hurtbox()).get_center()
+		var spark := ContactSpark.new()
+		spark.origin = contact
+		spark.direction = source.attack_world_direction()
+		sparks.append(spark)
+		for i in 10:
+			var direction := spark.direction.rotated(rng.randf_range(-0.75, 0.75))
+			particles.append(ParticleEffect.new(contact, direction * rng.randf_range(100, 350), rng.randf_range(0.12, 0.28), rng.randf_range(2, 4), ArenaConfig.AMBER if kind == 0 else Color.WHITE))
 		sound("hit")
-		impact(4.5, 0.052)
+		impact(3.2, 0.042)
 
 func strike(rect: Rect2, from: Vector2) -> void:
 	if combat_active and rect.intersects(player.hurtbox()):
@@ -254,7 +301,7 @@ func show_slash(
 	direction: Vector2,
 	variant: int,
 	tint: Color = ArenaConfig.TEAL,
-	life: float = 0.22,
+	life: float = 0.14,
 ) -> void:
 	slashes.append(SlashEffect.new(origin, direction, variant, tint, life))
 
@@ -320,14 +367,46 @@ func draw_room() -> void:
 		backdrop.draw_rect(Rect2(x, 145, 6, 449), Color(accent, 0.3))
 
 func draw_effects() -> void:
+	for echo in echoes:
+		# BoxArt uses local transforms internally, so a single outer transform is
+		# insufficient. Draw a compact silhouette from the sampled world joints.
+		for limb in [["chest", "hip"], ["hip", "left_knee"], ["left_knee", "left_foot"], ["hip", "right_knee"], ["right_knee", "right_foot"], ["front_shoulder", "front_elbow"], ["front_elbow", "front_hand"]]:
+			if echo.rig.is_empty():
+				continue
+			var a: Vector2 = echo.rig[limb[0]]
+			var b: Vector2 = echo.rig[limb[1]]
+			BoxArt.bar(effects, echo.origin + a * Vector2(echo.facing, 1), echo.origin + b * Vector2(echo.facing, 1), 5, Color(ArenaConfig.TEAL, echo.life / 0.13 * 0.22))
+		effects.draw_set_transform(Vector2.ZERO)
+	for i in range(1, hammer_traces.size()):
+		var a := hammer_traces[i - 1]
+		var b := hammer_traces[i]
+		if a.point.distance_to(b.point) < 150:
+			BoxArt.bar(effects, a.point, b.point, 12, Color(ArenaConfig.AMBER, b.life / 0.12 * 0.16))
+			BoxArt.bar(effects, a.point, b.point, 3, Color(ArenaConfig.AMBER, b.life / 0.12 * 0.40))
+	for spark in sparks:
+		var progress := 1.0 - spark.life / 0.13
+		var alpha := 1.0 - progress
+		for i in 6:
+			var ray := spark.direction.rotated(i * TAU / 6.0 + 0.23)
+			var reach := (30.0 if i % 2 == 0 else 19.0) * (0.55 + progress)
+			BoxArt.bar(effects, spark.origin + ray * progress * 12, spark.origin + ray * reach, 3.0 * alpha + 1, Color(Color.WHITE, alpha))
+		effects.draw_circle(spark.origin, 5 * alpha, Color(ArenaConfig.AMBER, alpha))
 	for particle in particles:
 		var tint: Color = particle.color
 		tint.a = minf(particle.life * 4, 1)
 		effects.draw_rect(Rect2(particle.position, Vector2.ONE * particle.size), tint)
 	for slam_ in slams:
 		var tint: Color = slam_.color
-		tint.a = slam_.life * 2.2
-		effects.draw_rect(slam_.rect, tint)
+		var progress := 1.0 - slam_.life / 0.18
+		tint.a = (1.0 - progress) * 0.55
+		var ground := slam_.rect.end.y
+		effects.draw_rect(Rect2(slam_.rect.position.x, ground - 4, slam_.rect.size.x, 5), tint)
+		for i in 7:
+			var x := slam_.rect.position.x + (i + 0.5) * slam_.rect.size.x / 7.0
+			var height := (18 + (i * 17 % 35)) * sin((progress * 0.8 + 0.2) * PI)
+			effects.draw_colored_polygon(PackedVector2Array([
+				Vector2(x - 10, ground), Vector2(x + 5, ground - height), Vector2(x + 12, ground)
+			]), tint)
 	for shock in shocks:
 		var progress := 1.0 - shock.life / shock.max_life
 		var current_radius := lerpf(shock.radius * 0.22, shock.radius, progress)
@@ -353,14 +432,14 @@ func draw_effects() -> void:
 		)
 	for slash in slashes:
 		var alpha: float = slash.life / slash.max_life
-		var reach := 150.0 if absf(slash.direction.x) > 0.5 else 142.0
+		var reach := (140.0 if absf(slash.direction.x) > 0.5 else 128.0) * lerpf(1.08, 0.85, alpha)
 		BoxArt.slash_arc(
 			effects,
 			slash.position,
 			slash.direction,
 			slash.variant,
 			slash.color,
-			alpha,
+			alpha * 0.48,
 			reach,
 		)
 	# Falling hazards and the Prism keep explicit targeting cues. The Quarry

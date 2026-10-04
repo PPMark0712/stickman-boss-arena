@@ -45,6 +45,10 @@ func run() -> void:
 	var quarry_recover_end: Dictionary = BoxArt.heavy_rig_snapshot("recover", 1.0)
 	var quarry_spin_start: Dictionary = BoxArt.heavy_rig_snapshot("attack", 0.0)
 	var quarry_spin_end: Dictionary = BoxArt.heavy_rig_snapshot("attack", 1.0)
+	var quarry_settle_middle: Dictionary = BoxArt.heavy_rig_snapshot("settle", 0.5)
+	var quarry_settle_end: Dictionary = BoxArt.heavy_rig_snapshot("settle", 1.0)
+	check(quarry_settle_middle.hammer_center.y < -90 and quarry_settle_end.hammer_center.is_equal_approx(quarry_idle.hammer_center), "Quarry recovery lifts the hammer above ground before returning to rest")
+	check(absf(quarry_impact.hammer_center.y + BoxArt.HEAVY_HAMMER_HEAD_RADIUS) < 1.0, "Quarry impact puts the hammer rim on the floor")
 	check(
 		quarry_idle.left_grip.x > quarry_idle.right_grip.x
 		and quarry_idle.hammer_center.x < quarry_idle.right_grip.x
@@ -406,10 +410,21 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	var jump_landing_progress := -1.0
 	var jump_landed_in_impact := false
 	var waves_before: int = room.attacks_spawned.wave
+	var ground_swing_seen := false
+	var ground_impact_seen := false
+	var ground_settle_seen := false
+	var ground_swing_before_impact := true
 	while not room.boss.action.is_empty() and ticks < 1100:
 		await physics_frame
 		ticks += 1
 		highest_boss_y = minf(highest_boss_y, room.boss.position.y)
+		if room.kind == 0 and attack in ["slam", "wave"]:
+			if room.boss.pose == "slam":
+				ground_swing_seen = true
+				ground_swing_before_impact = ground_swing_before_impact and room.boss.event_index == 0
+			if room.boss.event_index == 1 and room.boss.pose == "impact":
+				ground_impact_seen = true
+			ground_settle_seen = ground_settle_seen or room.boss.pose == "settle"
 		if room.kind == 0 and attack == "jump":
 			if room.boss.event_index == 2:
 				var dive_progress := room.boss.visual_progress()
@@ -466,6 +481,9 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 			combo_shock_seen = combo_shock_seen or not room.shocks.is_empty()
 	check(ticks < 1100, "Attack completes: %d / %s" % [room.kind, attack])
 	check(room.boss.position.y <= ArenaConfig.FLOOR_Y + 1, "Boss stays above floor: " + attack)
+	if room.kind == 0 and attack in ["slam", "wave"]:
+		check(ground_swing_seen and ground_swing_before_impact and ground_impact_seen, "Quarry swings down before ground impact is emitted: " + attack)
+		check(ground_settle_seen, "Quarry lifts its hammer through a recovery pose: " + attack)
 	if room.kind == 0 and attack == "jump":
 		var minimum_jump_height := 190.0 if room.boss.phase == 1 else 230.0
 		check(

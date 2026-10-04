@@ -114,8 +114,8 @@ func run() -> void:
 	)
 	player.step(1.0 / 120, controls({"axis": -1.0}))
 	check(
-		player.velocity.x == -ArenaConfig.RUN_SPEED and player.facing < 0,
-		"A moving attack continues responding to horizontal direction",
+		player.velocity.x == -ArenaConfig.RUN_SPEED and player.facing > 0,
+		"Retreating during a swing keeps the blade facing committed",
 	)
 	for i in 45:
 		player.step(1.0 / 120, idle)
@@ -397,7 +397,71 @@ func run() -> void:
 	player.invulnerable = 0
 	player.take_damage(99, Vector2.ZERO)
 	check(player.state == ArenaPlayer.State.DEAD and player.health == 0, "Death state clamps health")
+	verify_feel_inputs(arena)
 	print("PLAYER TESTS: %s checks, %s failures" % [checks, failures])
 	arena.queue_free()
 	await process_frame
 	quit(1 if failures else 0)
+
+func verify_feel_inputs(arena: TestArena) -> void:
+	var fighter := ArenaPlayer.new()
+	fighter.arena = arena
+	fighter.position = Vector2(400, ArenaConfig.FLOOR_Y)
+	arena.add_child(fighter)
+	fighter.set_physics_process(false)
+	var idle := controls()
+	for i in 10:
+		fighter.step(1.0 / 120, idle)
+	fighter.step(1.0 / 120, controls({"attack": true}))
+	fighter.step(1.0 / 120, controls({"up": true, "attack": true}))
+	for i in 40:
+		fighter.step(1.0 / 120, idle)
+	check(fighter.state == ArenaPlayer.State.ATTACK and fighter.attack_direction == Vector2.UP, "Queued slash remembers released directional input")
+	for i in 50:
+		fighter.step(1.0 / 120, idle)
+	fighter.step(1.0 / 120, controls({"attack": true}))
+	for i in 29:
+		fighter.step(1.0 / 120, idle)
+	fighter.step(1.0 / 120, controls({"axis": -1.0}))
+	check(fighter.state == ArenaPlayer.State.ATTACK and fighter.velocity.x < 0, "Stationary slash unlocks movement during recovery")
+	fighter.change_state(ArenaPlayer.State.IDLE)
+	fighter.dash_cooldown = 0.04
+	fighter.step(1.0 / 120, controls({"dash": true, "axis": -1.0}))
+	check(fighter.state != ArenaPlayer.State.DASH, "Dash buffer respects cooldown")
+	for i in 6:
+		fighter.step(1.0 / 120, idle)
+	check(fighter.state == ArenaPlayer.State.DASH and fighter.facing == -1, "Dash executes buffered direction when cooldown expires")
+	fighter.step(1.0 / 120, controls({"up": true, "attack": true}))
+	for i in 16:
+		fighter.step(1.0 / 120, idle)
+	check(fighter.state == ArenaPlayer.State.ATTACK and fighter.attack_direction == Vector2.UP, "Dash hands off buffered attack without an idle frame")
+	fighter.change_state(ArenaPlayer.State.IDLE)
+	fighter.attack_buffer = 0
+	fighter.attack_queued = false
+	fighter.energy = 9
+	check(fighter.cast_spell(), "Cast starts for recovery-cancel checks")
+	fighter.step(1.0 / 120, controls({"jump": true}))
+	check(fighter.state == ArenaPlayer.State.CAST, "Jump cannot erase spell startup")
+	fighter.dash_cooldown = 0
+	check(not fighter.begin_dash(idle), "Dash cannot erase spell startup")
+	for i in 18:
+		fighter.step(1.0 / 120, idle)
+	fighter.step(1.0 / 120, controls({"jump": true}))
+	check(fighter.state == ArenaPlayer.State.AIR, "Jump may cancel spell recovery")
+	fighter.change_state(ArenaPlayer.State.HEAL)
+	fighter.focus_active = true
+	fighter.focus_consumed = true
+	fighter.energy = 2
+	check(fighter.begin_dash(controls({"focus": true})), "Dash actively cancels healing")
+	check(fighter.energy == 2 and fighter.focus_cancelled, "Heal cancel preserves spent energy and consumes the hold")
+	fighter.invulnerable = 0
+	fighter.attack_queued = true
+	fighter.dash_buffer = 0.12
+	fighter.jump_buffer = 0.14
+	fighter.take_damage(1, Vector2.ZERO)
+	check(not fighter.attack_queued and fighter.dash_buffer == 0 and fighter.jump_buffer == 0, "Damage clears old action intents")
+	fighter.visual.sample_loop("run", 0.449, "run")
+	var before := fighter.visual.animation_clock
+	fighter.visual.sample_loop("run", 0.451, "run")
+	check(is_equal_approx(fighter.visual.animation_clock - before, 0.002), "Procedural running phase stays continuous across clip wrap")
+	fighter.queue_free()

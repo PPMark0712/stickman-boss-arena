@@ -1,6 +1,8 @@
 class_name ArenaPlayer
 extends CharacterBody2D
 
+const FIGHTER_VISUAL_SCENE := preload("res://scenes/fighter_visual.tscn")
+
 signal stats_changed
 signal died
 
@@ -33,6 +35,11 @@ var attack_direction := Vector2.RIGHT
 var hit_targets: Array[int] = []
 var attack_buffer := 0.0
 var attack_queued := false
+var buffered_attack_vertical := 0
+var buffered_attack_facing := 0.0
+var dash_buffer := 0.0
+var buffered_dash_axis := 0.0
+var jump_cut_pending := false
 var attack_variant := 0
 var next_attack_variant := 0
 var attack_movement_locked := true
@@ -48,9 +55,10 @@ var landing_squash := 0.0
 var turn_dust_cooldown := 0.0
 var was_grounded := false
 var controlled := true
-var visual: Node2D
+var visual: ProceduralFighterVisual
 var live_controls := Controls.new()
 var neutral_controls := Controls.new()
+var dash_controls := Controls.new()
 
 func _ready() -> void:
 	collision_layer = 2
@@ -61,9 +69,11 @@ func _ready() -> void:
 	collider.shape = shape
 	collider.position.y = -ArenaConfig.PLAYER_HEIGHT * 0.5
 	add_child(collider)
-	visual = Node2D.new()
-	visual.draw.connect(_draw_fighter)
+	visual = FIGHTER_VISUAL_SCENE.instantiate()
+	visual.fighter_kind = ProceduralFighterVisual.FighterKind.PLAYER
 	add_child(visual)
+	visual.draw.connect(_draw_fighter)
+	sync_visual()
 
 func change_state(next: State, restart: bool = false) -> void:
 	if state == next and not restart:
@@ -95,6 +105,7 @@ func step(delta: float, controls: Controls) -> void:
 	flash = maxf(0, flash - delta)
 	jump_buffer = maxf(0, jump_buffer - delta)
 	attack_buffer = maxf(0, attack_buffer - delta)
+	dash_buffer = maxf(0, dash_buffer - delta)
 	hit_recoil_time = maxf(0, hit_recoil_time - delta)
 	dash_cooldown = maxf(0, dash_cooldown - delta)
 	landing_squash = maxf(0, landing_squash - delta * 5.5)
@@ -104,12 +115,22 @@ func step(delta: float, controls: Controls) -> void:
 		jumps_used = 0
 	if controls.jump and state != State.HEAL:
 		jump_buffer = ArenaConfig.JUMP_BUFFER
+		jump_cut_pending = false
+	if controls.jump_release:
+		jump_cut_pending = true
 	if controls.attack and state != State.HEAL:
 		attack_buffer = ArenaConfig.ATTACK_BUFFER
+		buffered_attack_vertical = -1 if controls.up else (1 if controls.down else 0)
+		buffered_attack_facing = signf(controls.axis)
 		if state == State.ATTACK:
 			attack_queued = true
 	if controls.dash:
-		begin_dash(controls)
+		dash_buffer = ArenaConfig.DASH_BUFFER
+		buffered_dash_axis = controls.axis
+	if dash_buffer > 0:
+		dash_controls.axis = buffered_dash_axis
+		dash_controls.focus = controls.focus
+		begin_dash(dash_controls)
 	if not is_on_floor() and state != State.DASH:
 		var gravity := (
 			ArenaConfig.PLAYER_FALL_GRAVITY
@@ -120,21 +141,25 @@ func step(delta: float, controls: Controls) -> void:
 	if state == State.DEAD:
 		velocity.x = move_toward(velocity.x, 0, 800 * delta)
 		move_and_slide()
+		sync_visual()
+		visual.advance_pose_blend(delta)
 		visual.queue_redraw()
 		return
 	if state == State.HURT:
 		if controls.focus_release or (focus_active and not controls.focus):
 			reset_focus()
 		velocity.x = move_toward(velocity.x, 0, 1100 * delta)
-		if state_time >= 0.24:
+		if state_time >= ArenaConfig.HURT_DURATION:
 			change_state(State.IDLE if is_on_floor() else State.AIR)
 	elif state == State.DASH:
 		if controls.focus_release or (focus_active and not controls.focus):
 			reset_focus()
 		velocity = Vector2(facing * ArenaConfig.DASH_SPEED, 0)
 		if state_time >= ArenaConfig.DASH_DURATION:
-			velocity.x = 0
+			velocity.x = controls.axis * ArenaConfig.RUN_SPEED
 			change_state(State.IDLE if is_on_floor() else State.AIR)
+			handle_movement(delta, controls)
+			handle_attack(controls)
 	else:
 		handle_focus(delta, controls)
 		handle_movement(delta, controls)
@@ -153,11 +178,11 @@ func step(delta: float, controls: Controls) -> void:
 			if state_time >= current_attack_duration():
 				finish_sword_attack(controls)
 		elif state == State.CAST:
-			if state_time >= 0.24:
+			if state_time >= ArenaConfig.CAST_DURATION:
 				change_state(State.IDLE if is_on_floor() else State.AIR)
 		elif state != State.HEAL:
 			var next := State.AIR
-			if is_on_floor():
+			if is_on_floor() and velocity.y >= 0:
 				next = State.RUN if absf(velocity.x) > 15 else State.IDLE
 			if state != next:
 				change_state(next)
@@ -171,6 +196,8 @@ func step(delta: float, controls: Controls) -> void:
 	was_grounded = grounded_now
 	position.x = clampf(position.x, ArenaConfig.LEFT_WALL + 14, ArenaConfig.RIGHT_WALL - 14)
 	visual.scale.x = facing
+	sync_visual()
+	visual.advance_pose_blend(delta)
 	visual.queue_redraw()
 
 func handle_movement(_delta: float, controls: Controls) -> void:
@@ -180,10 +207,10 @@ func handle_movement(_delta: float, controls: Controls) -> void:
 		return
 	if state == State.ATTACK:
 		if hit_recoil_time <= 0:
-			if attack_movement_locked:
+			if attack_movement_locked and state_time < current_attack_end():
 				velocity.x = 0
 			elif axis != 0:
-				facing = signf(axis)
+				# Feet may retreat during a swing; the blade keeps its committed facing.
 				velocity.x = axis * ArenaConfig.RUN_SPEED
 			else:
 				velocity.x = 0
@@ -201,7 +228,8 @@ func handle_movement(_delta: float, controls: Controls) -> void:
 		velocity.x = axis * ArenaConfig.RUN_SPEED
 	else:
 		velocity.x = 0
-	if jump_buffer > 0 and (is_on_floor() or coyote > 0 or jumps_used < 2):
+	var can_jump := state != State.CAST or state_time >= ArenaConfig.CAST_CANCEL_TIME
+	if can_jump and jump_buffer > 0 and (is_on_floor() or coyote > 0 or jumps_used < 2):
 		# Walking off an edge consumes the ground jump after the coyote window.
 		if not is_on_floor() and coyote <= 0:
 			jumps_used = maxi(jumps_used, 1)
@@ -213,24 +241,28 @@ func handle_movement(_delta: float, controls: Controls) -> void:
 			change_state(State.AIR)
 		elif state_time >= current_attack_end():
 			attack_queued = false
+			attack_buffer = 0
 			change_state(State.AIR)
 		arena.burst(position, ArenaConfig.TEAL, 7)
 		arena.sound("jump")
-	if controls.jump_release and velocity.y < -250:
+	if jump_cut_pending and velocity.y < -250 and jump_buffer <= 0:
 		velocity.y *= 0.48
+		jump_cut_pending = false
 
 func begin_dash(controls: Controls) -> bool:
 	if (
 		dash_cooldown > 0
-		or state == State.HEAL
+		or state == State.DASH
 		or state == State.HURT
 		or state == State.DEAD
+		or (state == State.CAST and state_time < ArenaConfig.CAST_CANCEL_TIME)
 	):
 		return false
 	if absf(controls.axis) > 0.1:
 		facing = signf(controls.axis)
 	attack_buffer = 0
 	attack_queued = false
+	dash_buffer = 0
 	hit_recoil_time = 0
 	if controls.focus or focus_active:
 		stop_focus_hold()
@@ -257,13 +289,18 @@ func handle_attack(controls: Controls) -> void:
 	begin_sword_attack(controls)
 
 func begin_sword_attack(controls: Controls) -> void:
+	var buffered := attack_buffer > 0 or attack_queued
+	var vertical := buffered_attack_vertical if buffered else (-1 if controls.up else (1 if controls.down else 0))
+	var aim := buffered_attack_facing if buffered else signf(controls.axis)
+	if aim != 0:
+		facing = aim
 	attack_variant = next_attack_variant
 	next_attack_variant = 1 - next_attack_variant
 	attack_direction = Vector2(facing, 0)
 	var airborne := not is_on_floor() or velocity.y < 0
-	if controls.up:
+	if vertical < 0:
 		attack_direction = Vector2.UP
-	elif airborne and controls.down:
+	elif airborne and vertical > 0:
 		attack_direction = Vector2.DOWN
 	attack_movement_locked = absf(velocity.x) < 1.0
 	if attack_movement_locked:
@@ -468,6 +505,9 @@ func take_damage(amount: int, from: Vector2) -> bool:
 	flash = 0.14
 	attack_buffer = 0
 	attack_queued = false
+	dash_buffer = 0
+	jump_buffer = 0
+	jump_cut_pending = false
 	hit_recoil_time = 0
 	if focus_active:
 		stop_focus_hold()
@@ -475,6 +515,8 @@ func take_damage(amount: int, from: Vector2) -> bool:
 		reset_focus()
 	velocity = Vector2(330 if position.x >= from.x else -330, -260)
 	change_state(State.HURT if health > 0 else State.DEAD)
+	sync_visual()
+	visual.advance_pose_blend(0.035)
 	arena.burst(position + Vector2(0, -40), ArenaConfig.DANGER, 20)
 	arena.impact(8, 0.07)
 	arena.sound("hurt")
@@ -483,7 +525,7 @@ func take_damage(amount: int, from: Vector2) -> bool:
 		died.emit()
 	return true
 
-func _draw_fighter() -> void:
+func sync_visual() -> void:
 	var tint := Color.WHITE if flash > 0 else ArenaConfig.INK
 	if invulnerable > 0 and fmod(clock, 0.12) < 0.055:
 		tint.a = 0.3
@@ -502,17 +544,26 @@ func _draw_fighter() -> void:
 				pose = "up"
 			else:
 				pose = "attack"
-	var attack_progress := state_time / current_attack_duration() if state == State.ATTACK else 0.0
-	BoxArt.player_fighter(
-		visual,
-		pose,
-		clock,
-		tint,
-		attack_progress,
-		attack_variant,
-		landing_squash,
-		not is_on_floor(),
-	)
+	visual.tint = tint
+	visual.variant = attack_variant
+	visual.squash = landing_squash
+	visual.airborne = not is_on_floor()
+	visual.vertical_velocity = velocity.y
+	if state == State.ATTACK:
+		var timeline := pose
+		if pose == "attack":
+			timeline = "attack_a" if attack_variant == 0 else "attack_b"
+		visual.sample(timeline, state_time / current_attack_duration(), pose)
+	elif state == State.DASH:
+		visual.sample("dash", state_time / ArenaConfig.DASH_DURATION, pose)
+	elif state == State.CAST:
+		visual.sample("cast", state_time / ArenaConfig.CAST_DURATION, pose)
+	elif state == State.HURT or state == State.DEAD:
+		visual.sample("hurt", state_time / ArenaConfig.HURT_DURATION, pose)
+	else:
+		visual.sample_loop(pose, clock, pose)
+
+func _draw_fighter() -> void:
 	visual.draw_rect(Rect2(-14, -57, 26, 4), ArenaConfig.TEAL)
 	BoxArt.bar(
 		visual,
@@ -529,14 +580,15 @@ func _draw_fighter() -> void:
 		var direction := attack_world_direction()
 		if direction.x != 0:
 			direction = Vector2.RIGHT
+		var sweep := inverse_lerp(current_attack_start(), current_attack_end(), state_time)
 		BoxArt.slash_arc(
 			visual,
 			Vector2(0, -45),
 			direction,
 			attack_variant,
 			ArenaConfig.TEAL,
-			0.74,
-			124.0 if direction.x != 0 else 118.0,
+			0.82 * sin(PI * clampf(sweep, 0.03, 0.97)),
+			(142.0 if direction.x != 0 else 128.0) * lerpf(0.88, 1.04, sweep),
 		)
 	if state == State.HEAL:
 		BoxArt.outline(visual, Rect2(-21, -86, 42, 6), ArenaConfig.MUTED, 1)
@@ -556,3 +608,8 @@ func _draw_fighter() -> void:
 			Rect2(-20, -85, 40 * heal_progress, 4),
 			ArenaConfig.TEAL,
 		)
+		var center := Vector2(3, -38)
+		visual.draw_arc(center, 12 + sin(clock * 10) * 2, -PI * 0.5, -PI * 0.5 + TAU * maxf(heal_progress, 0.02), 28, Color(ArenaConfig.TEAL, 0.65), 2)
+		for i in 5:
+			var mote := center + Vector2.from_angle(clock * 2 + i * TAU / 5) * (22 - heal_progress * 10)
+			visual.draw_circle(mote, 1.5, Color(ArenaConfig.TEAL, 0.55))
