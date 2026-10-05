@@ -40,6 +40,10 @@ enum FighterKind { PLAYER, QUARRY, PRISM }
 	set(value):
 		vertical_velocity = value
 		queue_redraw()
+@export_range(-800.0, 800.0, 1.0) var horizontal_velocity := 0.0:
+	set(value):
+		horizontal_velocity = value
+		queue_redraw()
 @export var weapon_in_front := true:
 	set(value):
 		weapon_in_front = value
@@ -56,6 +60,10 @@ var last_pose := ""
 var blend_elapsed := 1.0
 var blend_duration := 0.06
 
+func restart_pose_blend() -> void:
+	# A new swing may use the same pose name as the previous swing.
+	last_pose = ""
+
 func advance_pose_blend(delta: float) -> void:
 	if fighter_kind != FighterKind.PLAYER:
 		return
@@ -65,7 +73,7 @@ func advance_pose_blend(delta: float) -> void:
 		blend_duration = 0.035 if pose in ["attack", "up", "down", "hurt", "dash"] else 0.075
 		last_pose = pose
 	blend_elapsed += delta
-	var target := BoxArt.player_rig(pose, animation_clock, animation_progress, variant, squash, airborne, vertical_velocity)
+	var target := BoxArt.player_rig(pose, animation_clock, animation_progress, variant, squash, airborne, vertical_velocity, horizontal_velocity)
 	var weight := smoothstep(0.0, blend_duration, blend_elapsed)
 	blended_rig = target
 	if weight < 1.0 and not blend_from.is_empty():
@@ -118,6 +126,7 @@ func _draw() -> void:
 			airborne,
 			{} if Engine.is_editor_hint() else blended_rig,
 			vertical_velocity,
+			horizontal_velocity,
 		)
 		return
 	BoxArt.fighter(

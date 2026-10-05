@@ -376,6 +376,8 @@ func run() -> void:
 		check(not is_instance_valid(game.room) and is_instance_valid(game.menu), "Return to menu")
 	game.queue_free()
 	await frames(3)
+	await verify_spell_paths()
+	await verify_airborne_transition()
 	print("GAMEPLAY TESTS: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
 
@@ -407,8 +409,13 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	var jump_dive_monotonic := true
 	var jump_last_dive_progress := 0.0
 	var jump_air_dive_progress := 0.0
-	var jump_landing_progress := -1.0
 	var jump_landed_in_impact := false
+	var was_airborne := false
+	var landed := false
+	var impact_on_landing := false
+	var combo_last_dive_progress := 0.0
+	var combo_dive_monotonic := true
+	var combo_midair_arc_seen := false
 	var waves_before: int = room.attacks_spawned.wave
 	var ground_swing_seen := false
 	var ground_impact_seen := false
@@ -418,6 +425,16 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 		await physics_frame
 		ticks += 1
 		highest_boss_y = minf(highest_boss_y, room.boss.position.y)
+		if room.kind == 0 and attack in ["jump", "combo"]:
+			if not room.boss.is_on_floor():
+				was_airborne = true
+			elif was_airborne and not landed:
+				landed = true
+				impact_on_landing = (
+					room.boss.pose == "impact"
+					and room.boss.event_index == (3 if attack == "jump" else 8)
+					and is_zero_approx(room.boss.action_time)
+				)
 		if room.kind == 0 and attack in ["slam", "wave"]:
 			if room.boss.pose == "slam":
 				ground_swing_seen = true
@@ -437,9 +454,7 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 					and dive_progress + 0.001 >= jump_last_dive_progress
 				)
 				jump_last_dive_progress = dive_progress
-				if room.boss.is_on_floor():
-					jump_landing_progress = dive_progress
-				else:
+				if not room.boss.is_on_floor():
 					jump_air_dive_progress = maxf(jump_air_dive_progress, dive_progress)
 			elif room.boss.event_index == 3:
 				jump_landed_in_impact = (
@@ -468,6 +483,10 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 				)
 			elif room.boss.event_index == 7:
 				combo_dive_ticks += 1
+				var progress := room.boss.visual_progress()
+				combo_dive_monotonic = combo_dive_monotonic and progress >= combo_last_dive_progress
+				combo_midair_arc_seen = combo_midair_arc_seen or (progress > 0.25 and progress < 0.75)
+				combo_last_dive_progress = progress
 				combo_target_stayed_locked = (
 					combo_target_stayed_locked
 					and is_equal_approx(room.boss.target_x, combo_locked_target)
@@ -495,10 +514,11 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 			and jump_dive_started_airborne
 			and jump_dive_monotonic
 			and jump_air_dive_progress >= 0.75
-			and jump_landing_progress >= 0.99
 			and jump_landed_in_impact,
 			"Quarry completes its downward hammer arc exactly as the jump lands",
 		)
+	if room.kind == 0 and attack in ["jump", "combo"]:
+		check(landed and impact_on_landing, "Quarry resolves impact on the first grounded frame: " + attack)
 	if attack == "combo":
 		check(
 			ArenaConfig.FLOOR_Y - highest_boss_y >= 220.0,
@@ -520,8 +540,123 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 			"Quarry uses a distinct fast non-spinning descent",
 		)
 		check(
+			combo_dive_monotonic and combo_midair_arc_seen and combo_last_dive_progress > 0.8,
+			"Combo hammer follows actual descent distance through the entire downward arc",
+		)
+		check(
 			combo_shock_seen
 			and room.attacks_spawned.wave - waves_before == 2,
 			"Quarry finisher creates a red shock effect and two ground waves",
 		)
 	room.boss.cooldown = 1000
+
+func verify_spell_paths() -> void:
+	var room := ArenaRoom.new()
+	root.add_child(room)
+	room.set_process(false)
+	room.player.set_physics_process(false)
+	room.boss.set_physics_process(false)
+	room.boss.phase = 2
+	room.boss.position = Vector2(640, ArenaConfig.FLOOR_Y)
+	for direction in [-1.0, 1.0]:
+		room.boss.health = room.boss.max_health
+		var start := Vector2(640 - direction * 220, ArenaConfig.FLOOR_Y - 35)
+		room.spawn_spell(start, direction)
+		var spell := room.hazards.get_child(-1) as ArenaHazard
+		spell.velocity.x = direction * 4000
+		spell._physics_process(0.12)
+		check(
+			not spell.active and room.boss.health == room.boss.max_health - ArenaConfig.SPELL_DAMAGE,
+			"Fast spell hits a crossed target in direction %.0f" % direction,
+		)
+		spell._physics_process(0.12)
+		check(
+			room.boss.health == room.boss.max_health - ArenaConfig.SPELL_DAMAGE,
+			"A consumed spell cannot damage twice",
+		)
+		room.restore_time_scale()
+		room.spawn_spell(Vector2(640, ArenaConfig.FLOOR_Y - 35), direction)
+		spell = room.hazards.get_child(-1) as ArenaHazard
+		spell._physics_process(0.12)
+		check(
+			not spell.active and room.boss.health == room.boss.max_health - ArenaConfig.SPELL_DAMAGE * 2,
+			"Spell spawned overlapping a boss still lands before leaving the target",
+		)
+		room.restore_time_scale()
+	room.boss.phase_pending = true
+	var health := room.boss.health
+	var pulse_count := room.spell_pulses.size()
+	room.spawn_spell(Vector2(600, ArenaConfig.FLOOR_Y - 35), 1)
+	var blocked := room.hazards.get_child(-1) as ArenaHazard
+	blocked._physics_process(0.06)
+	check(
+		not blocked.active and room.boss.health == health
+		and room.spell_pulses.size() == pulse_count + 2 and room.hitstop == 0,
+		"Phase shield consumes a spell with visible feedback and no damage or hitstop",
+	)
+	room.boss.phase_pending = false
+	for direction in [-1.0, 1.0]:
+		room.spawn_spell(Vector2(640, 200), direction)
+		var missed := room.hazards.get_child(-1) as ArenaHazard
+		missed._physics_process(0.80)
+		check(
+			not missed.active and room.boss.health == health,
+			"A vertically missed spell dissipates at the arena wall",
+		)
+	room.boss.health = ArenaConfig.SPELL_DAMAGE
+	Engine.time_scale = 0.8
+	room.spawn_spell(Vector2(600, ArenaConfig.FLOOR_Y - 35), 1)
+	var lethal := room.hazards.get_child(-1) as ArenaHazard
+	lethal._physics_process(0.06)
+	check(
+		room.boss.dead and not room.combat_active and not room.owns_time_scale
+		and is_equal_approx(Engine.time_scale, 0.8),
+		"Lethal spell feedback cannot reactivate hitstop after victory",
+	)
+	Engine.time_scale = 1.0
+	room.queue_free()
+	await frames(2)
+
+func verify_airborne_transition() -> void:
+	for attack in ["jump", "combo"]:
+		var room := ArenaRoom.new()
+		root.add_child(room)
+		room.player.controlled = false
+		room.player.invulnerable = 1000
+		room.boss.cooldown = 1000
+		await frames(4)
+		room.boss.cooldown = 0
+		room.boss.begin_attack(attack)
+		var ticks := 0
+		var ascent_event := 1 if attack == "jump" else 5
+		while (room.boss.event_index != ascent_event or room.boss.is_on_floor()) and ticks < 500:
+			await physics_frame
+			ticks += 1
+		check(ticks < 500, "Transition scenario reaches ascent: " + attack)
+		room.boss.take_damage(room.boss.max_health / 2, room.player.position)
+		var locked_target := room.boss.target_x
+		room.player.position.x = 1100
+		var stayed_committed := true
+		var landing_seen := false
+		ticks = 0
+		while room.boss.phase == 1 and ticks < 500:
+			await physics_frame
+			ticks += 1
+			if not room.boss.action.is_empty():
+				stayed_committed = stayed_committed and (
+					room.boss.action == attack
+					and is_equal_approx(room.boss.target_x, locked_target)
+					and room.boss.phase_time == 0
+				)
+			landing_seen = landing_seen or (
+				room.boss.is_on_floor() and room.boss.pose == "impact"
+			)
+		check(
+			stayed_committed and landing_seen and room.boss.phase == 2
+			and room.boss.is_on_floor(),
+			"Half-health waits for committed landing/recovery before transitioning: " + attack,
+		)
+		await frames(180)
+		check(not room.boss.phase_pending, "Deferred phase transition completes: " + attack)
+		room.queue_free()
+		await frames(2)

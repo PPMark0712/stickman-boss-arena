@@ -42,17 +42,31 @@ func _physics_process(delta: float) -> void:
 		velocity.y += 1600 * delta
 	if kind == "blade" and returning:
 		velocity.x -= launch_direction * 520 * delta
+	var previous_box := hitbox()
 	position += velocity * delta
 	var rect := hitbox()
 	if kind == "spell":
-		if not triggered and not arena.boss.dead and rect.intersects(arena.boss.hurtbox()):
-			if arena.boss.take_damage(ArenaConfig.SPELL_DAMAGE, position):
-				triggered = true
-				arena.burst(position, tint, 20)
-				arena.sound("hit")
-				arena.impact(4, 0.04)
-				deactivate()
-				return
+		# Spells travel horizontally: merging endpoint boxes covers the full path,
+		# including targets already overlapping the muzzle on the launch frame.
+		var swept := previous_box.merge(rect)
+		var target: Rect2 = arena.boss.hurtbox()
+		var direction := Vector2(launch_direction, 0)
+		if not triggered and not arena.boss.dead and swept.intersects(target):
+			triggered = true
+			var overlap := swept.intersection(target)
+			var contact := Vector2(
+				overlap.position.x if launch_direction > 0 else overlap.end.x,
+				overlap.get_center().y,
+			)
+			var damaged: bool = arena.boss.take_damage(ArenaConfig.SPELL_DAMAGE, contact)
+			arena.spell_impact(contact, direction, damaged)
+			deactivate()
+			return
+		if rect.position.x <= ArenaConfig.LEFT_WALL or rect.end.x >= ArenaConfig.RIGHT_WALL:
+			var wall_x := ArenaConfig.LEFT_WALL if launch_direction < 0 else ArenaConfig.RIGHT_WALL
+			arena.spell_impact(Vector2(wall_x, rect.get_center().y), direction, false)
+			deactivate()
+			return
 	else:
 		if not reflected and rect.intersects(arena.player.hurtbox()):
 			arena.player.take_damage(1, position)
@@ -97,8 +111,24 @@ func _draw() -> void:
 				draw_rect(Rect2(x, -height, 6, height), Color(tint, 0.68))
 				draw_rect(Rect2(x, -height, 6, 4), tint)
 		"spell":
-			for i in 5:
-				draw_rect(Rect2(-26 - i * signf(velocity.x) * 10, -30 + i * 3, 44, 24 - i * 4), Color(tint, 0.85 - i * 0.15))
+			var center := Vector2(0, -size.y * 0.5)
+			var heading := Vector2(signf(velocity.x), 0)
+			var side := Vector2.UP
+			# The bright body fits its damage box; the fading tail is decorative.
+			for i in range(5, 0, -1):
+				var trail := center - heading * (15 + i * 9)
+				draw_circle(trail, 12 - i * 1.7, Color(tint, 0.23 - i * 0.035))
+			var body := PackedVector2Array()
+			for i in 24:
+				var angle := i * TAU / 24.0
+				body.append(center + Vector2(cos(angle) * 29, sin(angle) * 17))
+			draw_colored_polygon(body, Color(tint, 0.28))
+			draw_circle(center, 13, Color(tint, 0.85))
+			draw_circle(center + heading * 7, 8, Color("#ecfff8"))
+			BoxArt.bar(self, center - heading * 25, center + heading * 25, 4, Color.WHITE)
+			var flutter := sin(age * 45) * 2
+			for edge in [-1.0, 1.0]:
+				BoxArt.bar(self, center - heading * 34 + side * (10 + flutter) * edge, center + heading * 7 + side * 13 * edge, 2, Color(tint, 0.7))
 		"blade":
 			var direction := Vector2.from_angle(age * 16)
 			BoxArt.bar(self, -direction * 25 + Vector2(0, -16), direction * 25 + Vector2(0, -16), 6, tint)

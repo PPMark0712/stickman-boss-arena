@@ -465,3 +465,76 @@ func verify_feel_inputs(arena: TestArena) -> void:
 	fighter.visual.sample_loop("run", 0.451, "run")
 	check(is_equal_approx(fighter.visual.animation_clock - before, 0.002), "Procedural running phase stays continuous across clip wrap")
 	fighter.queue_free()
+	verify_recovery_inputs(arena)
+
+func verify_recovery_inputs(arena: TestArena) -> void:
+	var fighter := ArenaPlayer.new()
+	fighter.arena = arena
+	fighter.position = Vector2(400, ArenaConfig.FLOOR_Y)
+	arena.add_child(fighter)
+	fighter.set_physics_process(false)
+	var idle := controls()
+	for i in 10:
+		fighter.step(1.0 / 120, idle)
+	fighter.energy = 9
+	fighter.cast_spell()
+	fighter.step(1.0 / 120, controls({"axis": -1.0, "attack": true}))
+	check(
+		fighter.state == ArenaPlayer.State.CAST and fighter.facing == 1
+		and fighter.velocity.x == -ArenaConfig.RUN_SPEED,
+		"Spell startup allows retreat without reversing the casting hand",
+	)
+	for i in 19:
+		fighter.step(1.0 / 120, idle)
+	check(
+		fighter.state == ArenaPlayer.State.ATTACK and fighter.facing == -1,
+		"A buffered sword attack cancels spell recovery at 160 ms",
+	)
+	var rig_before := fighter.visual.blended_rig.duplicate()
+	fighter.begin_sword_attack(idle)
+	fighter.sync_visual()
+	fighter.visual.advance_pose_blend(0.0)
+	check(
+		fighter.visual.blended_rig.front_hand.is_equal_approx(rig_before.front_hand)
+		and is_equal_approx(fighter.visual.blended_rig.sword_angle, rig_before.sword_angle),
+		"Restarting the same slash pose blends from the previous hand and blade",
+	)
+	fighter.change_state(ArenaPlayer.State.IDLE)
+	fighter.attack_buffer = 0
+	fighter.attack_queued = false
+	fighter.take_damage(1, Vector2.ZERO)
+	fighter.state_time = ArenaConfig.HURT_DURATION - 1.0 / 120
+	fighter.step(1.0 / 120, controls({"axis": 1.0, "attack": true}))
+	check(
+		fighter.state == ArenaPlayer.State.ATTACK and fighter.velocity.x > 0,
+		"Hurt recovery accepts movement and attack on its first actionable frame",
+	)
+	fighter.change_state(ArenaPlayer.State.IDLE)
+	fighter.facing = 1
+	fighter.dash_cooldown = 0.04
+	fighter.step(1.0 / 120, controls({"dash": true}))
+	for i in 5:
+		fighter.step(1.0 / 120, controls({"axis": -1.0}))
+	check(
+		fighter.state == ArenaPlayer.State.DASH and fighter.facing == 1,
+		"Neutral buffered dash remembers press-time facing despite a later turn",
+	)
+	fighter.change_state(ArenaPlayer.State.IDLE)
+	fighter.facing = 1
+	fighter.dash_cooldown = 0
+	fighter.begin_dash(idle)
+	for i in 12:
+		fighter.step(1.0 / 120, idle)
+	fighter.step(1.0 / 120, controls({"attack": true}))
+	for i in 5:
+		fighter.step(1.0 / 120, controls({"axis": -1.0}))
+	check(
+		fighter.state == ArenaPlayer.State.ATTACK and fighter.facing == 1,
+		"Neutral buffered slash remembers facing through dash-to-run handoff",
+	)
+	fighter.attack_direction = Vector2.DOWN
+	fighter.hit_targets.clear()
+	fighter.jump_cut_pending = true
+	fighter.register_hit(998)
+	check(not fighter.jump_cut_pending, "An old jump release cannot truncate a down-slash rebound")
+	fighter.queue_free()

@@ -78,6 +78,8 @@ func _ready() -> void:
 func change_state(next: State, restart: bool = false) -> void:
 	if state == next and not restart:
 		return
+	if restart and is_instance_valid(visual):
+		visual.restart_pose_blend()
 	state = next
 	state_time = 0.0
 
@@ -121,12 +123,12 @@ func step(delta: float, controls: Controls) -> void:
 	if controls.attack and state != State.HEAL:
 		attack_buffer = ArenaConfig.ATTACK_BUFFER
 		buffered_attack_vertical = -1 if controls.up else (1 if controls.down else 0)
-		buffered_attack_facing = signf(controls.axis)
+		buffered_attack_facing = signf(controls.axis) if controls.axis != 0 else facing
 		if state == State.ATTACK:
 			attack_queued = true
 	if controls.dash:
 		dash_buffer = ArenaConfig.DASH_BUFFER
-		buffered_dash_axis = controls.axis
+		buffered_dash_axis = controls.axis if controls.axis != 0 else facing
 	if dash_buffer > 0:
 		dash_controls.axis = buffered_dash_axis
 		dash_controls.focus = controls.focus
@@ -151,6 +153,11 @@ func step(delta: float, controls: Controls) -> void:
 		velocity.x = move_toward(velocity.x, 0, 1100 * delta)
 		if state_time >= ArenaConfig.HURT_DURATION:
 			change_state(State.IDLE if is_on_floor() else State.AIR)
+			if dash_buffer > 0:
+				begin_dash(dash_controls)
+			if state != State.DASH:
+				handle_movement(delta, controls)
+				handle_attack(controls)
 	elif state == State.DASH:
 		if controls.focus_release or (focus_active and not controls.focus):
 			reset_focus()
@@ -189,6 +196,8 @@ func step(delta: float, controls: Controls) -> void:
 	var impact_speed := velocity.y
 	move_and_slide()
 	var grounded_now := is_on_floor()
+	if grounded_now and jump_buffer <= 0:
+		jump_cut_pending = false
 	if grounded_now and not was_grounded and impact_speed > 250:
 		landing_squash = clampf((impact_speed - 200) / 700.0, 0.35, 1.0)
 		arena.burst(position + Vector2(0, -2), ArenaConfig.MUTED, 5 + int(landing_squash * 5))
@@ -214,6 +223,9 @@ func handle_movement(_delta: float, controls: Controls) -> void:
 				velocity.x = axis * ArenaConfig.RUN_SPEED
 			else:
 				velocity.x = 0
+	elif state == State.CAST:
+		# The feet can retreat while the casting hand keeps its launch direction.
+		velocity.x = axis * ArenaConfig.RUN_SPEED
 	elif axis != 0:
 		if (
 			is_on_floor()
@@ -279,7 +291,7 @@ func handle_attack(controls: Controls) -> void:
 	if state == State.ATTACK or attack_buffer <= 0:
 		return
 	if (
-		state == State.CAST
+		(state == State.CAST and state_time < ArenaConfig.CAST_CANCEL_TIME)
 		or state == State.HEAL
 		or state == State.DASH
 		or state == State.HURT
@@ -350,7 +362,7 @@ func handle_focus(delta: float, controls: Controls) -> void:
 			and not focus_consumed
 			and not focus_cancelled
 		):
-			cast_spell()
+			cast_spell(controls.axis)
 		if state == State.HEAL:
 			change_state(State.IDLE)
 		reset_focus()
@@ -434,7 +446,7 @@ func stop_focus_hold(message: String = "") -> void:
 	if state == State.HEAL:
 		change_state(State.IDLE)
 
-func cast_spell() -> bool:
+func cast_spell(aim: float = 0.0) -> bool:
 	if (
 		state == State.ATTACK
 		or state == State.DASH
@@ -446,6 +458,8 @@ func cast_spell() -> bool:
 	if energy < ArenaConfig.ENERGY_COST:
 		arena.notify("需要 3 格能量 · 挥剑命中可积攒")
 		return false
+	if aim != 0:
+		facing = signf(aim)
 	energy -= ArenaConfig.ENERGY_COST
 	change_state(State.CAST)
 	arena.spawn_spell(position + Vector2(facing * 36, -39), facing)
@@ -484,6 +498,7 @@ func register_hit(target_id: int) -> bool:
 	if attack_direction == Vector2.DOWN:
 		velocity.y = -ArenaConfig.DOWN_SLASH_BOUNCE
 		jumps_used = 1
+		jump_cut_pending = false
 	else:
 		velocity.x = -facing * ArenaConfig.ATTACK_HIT_RECOIL
 	hit_recoil_time = ArenaConfig.ATTACK_HIT_RECOIL_TIME
@@ -549,6 +564,7 @@ func sync_visual() -> void:
 	visual.squash = landing_squash
 	visual.airborne = not is_on_floor()
 	visual.vertical_velocity = velocity.y
+	visual.horizontal_velocity = velocity.x * facing
 	if state == State.ATTACK:
 		var timeline := pose
 		if pose == "attack":
@@ -562,6 +578,8 @@ func sync_visual() -> void:
 		visual.sample("hurt", state_time / ArenaConfig.HURT_DURATION, pose)
 	else:
 		visual.sample_loop(pose, clock, pose)
+	# Keep footwork continuous through one-shot attack/cast clips as well.
+	visual.animation_clock = clock
 
 func _draw_fighter() -> void:
 	visual.draw_rect(Rect2(-14, -57, 26, 4), ArenaConfig.TEAL)

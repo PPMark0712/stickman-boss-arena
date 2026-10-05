@@ -22,10 +22,10 @@ const JUMP_LAUNCH_SPEED_PHASE_TWO := -960.0
 const COMBO_LAUNCH_SPEED := -930.0
 const COMBO_APEX_HOLD := 0.30
 const COMBO_DIVE_SPEED := 1080.0
-const COMBO_DIVE_POSE_TIME := 0.16
 const COMBO_FINISH_RADIUS := 185.0
 const HEAVY_VISUAL_SCALE := 1.65
 const HAMMER_SWING_TIME := 0.16
+const HAMMER_SETTLE_TIME := 0.32
 
 var arena: Node2D
 var kind := 0
@@ -75,7 +75,7 @@ func _ready() -> void:
 	sync_visual()
 	tree = ArenaBT.Selector.new([
 		ArenaBT.Sequence.new([
-			ArenaBT.Condition.new(func() -> bool: return phase_pending),
+			ArenaBT.Condition.new(can_start_phase_transition),
 			ArenaBT.Action.new(_phase_transition),
 		]),
 		ArenaBT.Sequence.new([
@@ -98,6 +98,7 @@ func _physics_process(delta: float) -> void:
 	tree.tick(delta)
 	move_and_slide()
 	if kind == 0:
+		resolve_landing()
 		step_dust_timer -= delta
 		if pose == "run" and is_on_floor() and absf(velocity.x) > 10 and step_dust_timer <= 0:
 			step_dust_timer = PI / 8.5
@@ -109,6 +110,10 @@ func _physics_process(delta: float) -> void:
 		arena.player.take_damage(1, position)
 	visual.scale = Vector2(facing, 1) * (HEAVY_VISUAL_SCALE if kind == 0 else 1.27)
 	visual.queue_redraw()
+
+func can_start_phase_transition() -> bool:
+	# Finish the Quarry's committed attack, including its landing and recovery.
+	return phase_pending and (kind != 0 or (action.is_empty() and is_on_floor()))
 
 func _phase_transition(delta: float) -> ArenaBT.Status:
 	if phase_time == 0:
@@ -189,7 +194,10 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				slam(false, action == "wave")
 			if event_index == 1 and action_time >= windup_duration() + 0.12:
 				set_pose("settle")
-			return action_time >= (1.18 if phase == 1 else 0.92)
+			return (
+				action_time >= (1.18 if phase == 1 else 0.92)
+				and pose == "settle" and pose_time >= HAMMER_SETTLE_TIME
+			)
 		"jump":
 			if at(windup_duration(), 0):
 				launch(
@@ -208,12 +216,6 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				set_pose("dive")
 				if velocity.y > 50:
 					velocity.y += 360.0 * delta
-				if is_on_floor():
-					event_index = 3
-					velocity.x = 0
-					slam(phase == 2, phase == 2)
-					set_pose("impact", true)
-					action_time = 0
 			if event_index == 3 and action_time >= 0.15:
 				set_pose("settle")
 			return event_index == 3 and action_time >= 0.50
@@ -237,6 +239,7 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				set_pose("attack")
 				if velocity.y >= -15.0:
 					event_index = 6
+					jump_apex_y = position.y
 					velocity = Vector2.ZERO
 					set_pose("apex", true)
 			if event_index == 6:
@@ -250,11 +253,6 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 					set_pose("dive", true)
 			if event_index == 7:
 				set_pose("dive")
-				if is_on_floor() and pose_time > 0.08:
-					event_index = 8
-					velocity.x = 0
-					combo_finisher()
-					action_time = 0
 			if event_index == 8 and action_time >= 0.18:
 				set_pose("settle")
 			return event_index == 8 and action_time > 0.58
@@ -274,6 +272,22 @@ func hammer_attack(delta: float = 1.0 / 120.0) -> bool:
 				set_pose("settle")
 			return action_time > 2.9
 	return false
+
+func resolve_landing() -> void:
+	# move_and_slide() is the authority for this tick's landing. Resolving before
+	# it leaves one grounded frame with the hammer still in its airborne state.
+	if not is_on_floor():
+		return
+	if action == "jump" and event_index == 2:
+		event_index = 3
+		velocity.x = 0
+		action_time = 0
+		slam(phase == 2, phase == 2)
+	elif action == "combo" and event_index == 7:
+		event_index = 8
+		velocity.x = 0
+		action_time = 0
+		combo_finisher()
 
 func mirror_attack() -> bool:
 	match action:
@@ -409,7 +423,10 @@ func hammer_head_center() -> Vector2:
 	var sampled_pose := visual.pose if is_instance_valid(visual) else pose
 	var sampled_progress := visual.animation_progress if is_instance_valid(visual) else visual_progress()
 	var sampled_clock := visual.animation_clock if is_instance_valid(visual) else clock
-	var rig := BoxArt.heavy_rig_snapshot(sampled_pose, sampled_progress, sampled_clock)
+	var rig := BoxArt.heavy_rig_snapshot(
+		sampled_pose, sampled_progress, sampled_clock,
+		visual.squash if is_instance_valid(visual) else 0.0,
+	)
 	var local_center: Vector2 = rig.hammer_center
 	return position + visual.position + Vector2(local_center.x * facing, local_center.y) * HEAVY_VISUAL_SCALE
 
@@ -478,7 +495,7 @@ func windup_duration() -> float:
 	return 0.6
 
 func visual_progress() -> float:
-	if phase_pending:
+	if phase_pending and phase_time > 0:
 		return clampf(phase_time / 1.2, 0.0, 1.0)
 	if action.is_empty():
 		return 0.0
@@ -497,22 +514,20 @@ func visual_progress() -> float:
 	if kind == 0 and pose == "slam":
 		return clampf(pose_time / HAMMER_SWING_TIME, 0.0, 1.0)
 	if pose == "settle":
-		return clampf(pose_time / 0.32, 0.0, 1.0)
+		return clampf(pose_time / HAMMER_SETTLE_TIME, 0.0, 1.0)
 	if pose == "attack" and action == "combo":
 		return clampf(
 			1.0 - absf(minf(velocity.y, 0.0)) / absf(COMBO_LAUNCH_SPEED),
 			0.0,
 			1.0,
 		)
-	if pose == "dive" and action == "jump":
+	if pose == "dive" and action in ["jump", "combo"]:
 		return clampf(
 			(position.y - jump_apex_y)
 			/ maxf(ArenaConfig.FLOOR_Y - jump_apex_y, 1.0),
 			0.0,
 			1.0,
 		)
-	if pose == "dive":
-		return clampf(pose_time / COMBO_DIVE_POSE_TIME, 0.0, 1.0)
 	if pose == "attack" or pose == "slam" or pose == "down":
 		return 0.88
 	return 0.0
@@ -528,7 +543,7 @@ func sync_visual() -> void:
 	var tint := Color.WHITE if flash > 0 else color()
 	if dead:
 		tint.a = 0.2
-	if phase_pending:
+	if phase_pending and phase_time > 0:
 		tint = tint.lerp(Color.WHITE, (sin(clock * 24) + 1) * 0.4)
 	visual.tint = tint
 	visual.variant = visual_variant()
@@ -547,7 +562,9 @@ func sync_visual() -> void:
 
 func _draw_fighter() -> void:
 	if kind == 0 and not dead and pose in ["windup", "recover", "apex"]:
-		var rig := BoxArt.heavy_rig_snapshot(visual.pose, visual.animation_progress, visual.animation_clock)
+		var rig := BoxArt.heavy_rig_snapshot(
+			visual.pose, visual.animation_progress, visual.animation_clock, visual.squash,
+		)
 		var head: Vector2 = rig.hammer_center
 		var charge := visual.animation_progress if pose != "apex" else 1.0
 		var glow := 0.12 + charge * 0.33
@@ -561,6 +578,6 @@ func _draw_fighter() -> void:
 		for i in 6:
 			var point := Vector2(0, -42) + Vector2.from_angle(clock * 19 + i * TAU / 6) * 67
 			BoxArt.bar(visual, point, point + Vector2(9, 9), 4, visual.tint)
-	if (pose == "windup" or pose == "apex") and not phase_pending:
+	if (pose == "windup" or pose == "apex") and not (phase_pending and phase_time > 0):
 		visual.draw_rect(Rect2(-3, -105, 6, 12), ArenaConfig.DANGER)
 		visual.draw_rect(Rect2(-3, -89, 6, 4), ArenaConfig.DANGER)

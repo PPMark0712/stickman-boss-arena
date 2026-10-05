@@ -77,6 +77,16 @@ class ContactSpark extends RefCounted:
 	var origin := Vector2.ZERO
 	var direction := Vector2.RIGHT
 	var life := 0.13
+	var tint := ArenaConfig.AMBER
+	var strength := 1.0
+
+class SpellPulse extends RefCounted:
+	var origin := Vector2.ZERO
+	var direction := Vector2.RIGHT
+	var tint := ArenaConfig.TEAL
+	var radius := 54.0
+	var life := 0.24
+	var max_life := 0.24
 
 class HammerTrace extends RefCounted:
 	var point := Vector2.ZERO
@@ -94,6 +104,7 @@ var shocks: Array[ShockEffect] = []
 var slashes: Array[SlashEffect] = []
 var echoes: Array[MotionEcho] = []
 var sparks: Array[ContactSpark] = []
+var spell_pulses: Array[SpellPulse] = []
 var hammer_traces: Array[HammerTrace] = []
 var echo_timer := 0.0
 var feedback_clock := 0.0
@@ -181,6 +192,10 @@ func _process(delta: float) -> void:
 		sparks[i].life -= real_delta
 		if sparks[i].life <= 0:
 			sparks.remove_at(i)
+	for i in range(spell_pulses.size() - 1, -1, -1):
+		spell_pulses[i].life -= real_delta
+		if spell_pulses[i].life <= 0:
+			spell_pulses.remove_at(i)
 	for i in range(hammer_traces.size() - 1, -1, -1):
 		hammer_traces[i].life -= delta
 		if hammer_traces[i].life <= 0:
@@ -215,7 +230,7 @@ func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
 			):
 				hazard.reflect_upward()
 				var contact := hazard.position - Vector2(0, hazard.size.y * 0.5)
-				burst(contact, ArenaConfig.TEAL, 14)
+				show_contact_spark(contact, Vector2.UP, ArenaConfig.TEAL)
 				sound("hit")
 				impact(3.5, 0.035)
 	if boss.dead or boss.phase_pending or not rect.intersects(boss.hurtbox()):
@@ -223,15 +238,51 @@ func resolve_sword(source: ArenaPlayer, rect: Rect2) -> void:
 	if source.register_hit(boss.get_instance_id()):
 		boss.take_damage(ArenaConfig.SWORD_DAMAGE, source.position)
 		var contact := rect.intersection(boss.hurtbox()).get_center()
-		var spark := ContactSpark.new()
-		spark.origin = contact
-		spark.direction = source.attack_world_direction()
-		sparks.append(spark)
-		for i in 10:
-			var direction := spark.direction.rotated(rng.randf_range(-0.75, 0.75))
-			particles.append(ParticleEffect.new(contact, direction * rng.randf_range(100, 350), rng.randf_range(0.12, 0.28), rng.randf_range(2, 4), ArenaConfig.AMBER if kind == 0 else Color.WHITE))
-		sound("hit")
-		impact(3.2, 0.042)
+		var downward := source.attack_direction == Vector2.DOWN
+		show_contact_spark(
+			contact, source.attack_world_direction(),
+			ArenaConfig.AMBER if kind == 0 else Color.WHITE,
+			1.3 if downward else 1.0,
+		)
+		sound("hit_heavy" if downward else "hit")
+		impact(4.5 if downward else 3.2, 0.055 if downward else 0.042)
+
+func show_contact_spark(
+	origin: Vector2, direction: Vector2, tint: Color, strength: float = 1.0,
+) -> void:
+	var spark := ContactSpark.new()
+	spark.origin = origin
+	spark.direction = direction
+	spark.tint = tint
+	spark.strength = strength
+	sparks.append(spark)
+	for i in int(10 * strength):
+		var ray := direction.rotated(rng.randf_range(-0.75, 0.75))
+		particles.append(ParticleEffect.new(
+			origin, ray * rng.randf_range(100, 350) * strength,
+			rng.randf_range(0.12, 0.28), rng.randf_range(2, 4), tint,
+		))
+
+func show_spell_pulse(
+	origin: Vector2, direction: Vector2, radius: float, tint: Color,
+	duration: float = 0.24,
+) -> void:
+	var pulse := SpellPulse.new()
+	pulse.origin = origin
+	pulse.direction = direction
+	pulse.radius = radius
+	pulse.tint = tint
+	pulse.life = duration
+	pulse.max_life = duration
+	spell_pulses.append(pulse)
+
+func spell_impact(origin: Vector2, direction: Vector2, damaged: bool) -> void:
+	var tint := ArenaConfig.TEAL if damaged else ArenaConfig.MUTED
+	show_spell_pulse(origin, direction, 62 if damaged else 30, tint)
+	show_contact_spark(origin, direction, tint, 1.6 if damaged else 0.6)
+	sound("spell_hit" if damaged else "spell_fizzle")
+	if damaged:
+		impact(5.5, 0.06)
 
 func strike(rect: Rect2, from: Vector2) -> void:
 	if combat_active and rect.intersects(player.hurtbox()):
@@ -242,6 +293,10 @@ func spawn_spell(at_position: Vector2, direction: float) -> void:
 	projectile.velocity.x = direction * 760
 	projectile.size = Vector2(62, 38)
 	projectile.lifetime = 1.8
+	show_spell_pulse(
+		at_position - Vector2(0, projectile.size.y * 0.5),
+		Vector2(direction, 0), 25, ArenaConfig.TEAL, 0.16,
+	)
 	attacks_spawned.spell += 1
 
 func spawn_wave(at_position: Vector2, direction: float, tint: Color) -> void:
@@ -307,6 +362,9 @@ func show_slash(
 
 func impact(power: float, duration: float) -> void:
 	shake = maxf(shake, power)
+	# A lethal hit emits feedback after end_fight has restored global time.
+	if not combat_active:
+		return
 	hitstop = maxf(hitstop, duration)
 	if not owns_time_scale:
 		previous_time_scale = Engine.time_scale
@@ -388,9 +446,22 @@ func draw_effects() -> void:
 		var alpha := 1.0 - progress
 		for i in 6:
 			var ray := spark.direction.rotated(i * TAU / 6.0 + 0.23)
-			var reach := (30.0 if i % 2 == 0 else 19.0) * (0.55 + progress)
+			var reach := (30.0 if i % 2 == 0 else 19.0) * (0.55 + progress) * spark.strength
 			BoxArt.bar(effects, spark.origin + ray * progress * 12, spark.origin + ray * reach, 3.0 * alpha + 1, Color(Color.WHITE, alpha))
-		effects.draw_circle(spark.origin, 5 * alpha, Color(ArenaConfig.AMBER, alpha))
+		effects.draw_circle(spark.origin, 5 * alpha * spark.strength, Color(spark.tint, alpha))
+	for pulse in spell_pulses:
+		var progress := 1.0 - pulse.life / pulse.max_life
+		var alpha := (1.0 - progress) * (1.0 - progress)
+		var radius := pulse.radius * lerpf(0.18, 1.0, sqrt(progress))
+		effects.draw_circle(pulse.origin, radius * 0.5, Color(pulse.tint, alpha * 0.12))
+		for band in 2:
+			effects.draw_arc(
+				pulse.origin, radius * (1.0 - band * 0.25),
+				0, TAU, 40, Color(pulse.tint, alpha * (0.85 - band * 0.3)),
+				(4.0 - band) * (1.0 - progress) + 1, true,
+			)
+		var side := pulse.direction.orthogonal()
+		BoxArt.bar(effects, pulse.origin - side * radius * 0.65, pulse.origin + side * radius * 0.65, 3 * alpha + 1, Color(Color.WHITE, alpha))
 	for particle in particles:
 		var tint: Color = particle.color
 		tint.a = minf(particle.life * 4, 1)
