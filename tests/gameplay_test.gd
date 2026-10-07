@@ -36,7 +36,7 @@ func run() -> void:
 		ArenaBoss.COMBO_LAUNCH_SPEED <= -900.0
 		and ArenaBoss.COMBO_APEX_HOLD >= 0.3
 		and ArenaBoss.COMBO_DIVE_SPEED > absf(ArenaBoss.COMBO_LAUNCH_SPEED),
-		"Quarry holds the overhead warning at the apex before a faster dive",
+		"Quarry holds the shoulder-height warning at the apex before a faster dive",
 	)
 	var quarry_idle: Dictionary = BoxArt.heavy_rig_snapshot("idle", 0.0)
 	var quarry_windup: Dictionary = BoxArt.heavy_rig_snapshot("windup", 1.0)
@@ -74,9 +74,35 @@ func run() -> void:
 		"Quarry silver hammer remains distinct from the dark arena",
 	)
 	check(
-		quarry_windup.hammer_center.y < quarry_idle.hammer_center.y,
-		"Quarry windup raises the hammer above its idle position",
+		quarry_idle.hammer_center.y - quarry_windup.hammer_center.y > 5
+		and quarry_idle.hammer_center.y - quarry_windup.hammer_center.y < 22
+		and quarry_windup.hammer_center.x < quarry_windup.head_center.x - 25,
+		"Quarry anticipation lifts the shoulder carry slightly and keeps the head behind",
 	)
+	var quarry_apex := BoxArt.heavy_rig_snapshot("apex", 0.0)
+	check(
+		quarry_apex.hammer_center.is_equal_approx(quarry_windup.hammer_center)
+		and BoxArt.heavy_rig_snapshot("air", 0.0).hammer_center.is_equal_approx(quarry_apex.hammer_center),
+		"Ground and airborne raises share the same shallow shoulder hold",
+	)
+	for swing_pose in ["slam", "dive"]:
+		var previous_angle: float = quarry_windup.hammer_angle
+		var forward_arc := true
+		var clears_floor := true
+		var passes_overhead := false
+		for i in 41:
+			var rig := BoxArt.heavy_rig_snapshot(swing_pose, i / 40.0)
+			forward_arc = forward_arc and rig.hammer_angle >= previous_angle
+			clears_floor = clears_floor and rig.hammer_center.y + rig.hammer_radius <= 1.0
+			passes_overhead = passes_overhead or (
+				absf(rig.hammer_center.x - rig.right_grip.x) < 8
+				and rig.hammer_center.y < rig.right_grip.y - 55
+			)
+			previous_angle = rig.hammer_angle
+		check(
+			forward_arc and clears_floor and passes_overhead,
+			"Quarry sweeps over the head toward impact without reversing through the floor: " + swing_pose,
+		)
 	check(
 		quarry_impact.hammer_center.x > quarry_impact.right_grip.x
 		and quarry_impact.hammer_center.y > quarry_impact.right_grip.y,
@@ -273,10 +299,15 @@ func run() -> void:
 			room.hazards.get_child_count() - 1
 		) as ArenaHazard
 		check(
-			cleared_hazard.size.y > ArenaConfig.PLAYER_HEIGHT
-				and cleared_hazard.size.x == ArenaHazard.WAVE_WIDTH
-				and cleared_hazard.size.x > cleared_hazard.size.y,
-				"Ground wave is slightly wider than its player-tall height",
+			is_equal_approx(cleared_hazard.size.y, ArenaConfig.PLAYER_JUMP_HEIGHT * 0.7)
+			and cleared_hazard.size.x == ArenaHazard.WAVE_WIDTH
+			and is_equal_approx(cleared_hazard.hitbox().size.y, ArenaHazard.WAVE_MAX_HEIGHT),
+			"Ground wave and hitbox use 70 percent of a full first jump",
+		)
+		var shock := ArenaRoom.ShockEffect.new(Vector2.ZERO, room.boss.color(), 185.0)
+		check(
+			is_equal_approx(shock.height, cleared_hazard.size.y) and shock.radius == 185,
+			"Impact shock keeps its horizontal range with the same low wave height",
 		)
 		room.clear_hazards()
 		check(

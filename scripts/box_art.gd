@@ -566,7 +566,7 @@ static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyP
 				_ease_in_out(progress),
 			)
 		"attack":
-			var spin := _heavy_key_pose("overhead_air")
+			var spin := _heavy_key_pose("raised_air")
 			var rotation := progress * TAU
 			spin.body_lean += sin(rotation) * 7.0
 			spin.right_grip += Vector2(
@@ -576,18 +576,17 @@ static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyP
 			spin.hammer_angle += rotation
 			return spin
 		"apex":
-			return _heavy_key_pose("overhead_air")
+			return _heavy_key_pose("raised_air")
 		"dive":
 			return _blend_heavy_poses(
-				_heavy_key_pose("overhead_air"),
+				_heavy_key_pose("raised_air"),
 				_heavy_key_pose("impact"),
 				_ease_in(progress),
 			)
 		"impact":
 			return _heavy_key_pose("impact")
 		"settle":
-			# Lift in front of the body before carrying the hammer behind the head.
-			# A shortest-angle blend straight to rest would sweep through the floor.
+			# Recover over the head without stopping there, then settle on the shoulder.
 			if progress < 0.62:
 				return _blend_heavy_poses(_heavy_key_pose("impact"), _heavy_key_pose("raised"), _ease_in_out(progress / 0.62))
 			return _blend_heavy_poses(_heavy_key_pose("raised"), rest, _ease_in_out((progress - 0.62) / 0.38))
@@ -600,13 +599,17 @@ static func _heavy_motion(pose: String, progress: float, clock: float) -> HeavyP
 static func _heavy_key_pose(name: String) -> HeavyPose:
 	var key := HeavyPose.new()
 	match name:
-		"raised":
-			key.body_lean = -7.0
+		"raised", "raised_air", "airborne":
+			key.body_lean = -5.0
 			key.body_lift = -1.0
-			key.hammer_angle = -1.55
-			key.right_grip = Vector2(24, -45)
+			# Anticipation stays just above the shoulder carry, behind the head.
+			key.hammer_angle = -2.72
+			key.right_grip = Vector2(18, -32)
 			key.left_foot = Vector2(-22, -2)
 			key.right_foot = Vector2(22, -2)
+			if name != "raised":
+				key.left_foot = Vector2(-21, -10)
+				key.right_foot = Vector2(20, -7)
 		"impact":
 			key.body_lean = 12.0
 			key.body_lift = 3.0
@@ -615,20 +618,6 @@ static func _heavy_key_pose(name: String) -> HeavyPose:
 			key.right_grip = Vector2(32, -30)
 			key.left_foot = Vector2(-26, -2)
 			key.right_foot = Vector2(25, -2)
-		"overhead_air":
-			key.body_lean = -7.0
-			key.body_lift = -1.0
-			key.hammer_angle = -1.55
-			key.right_grip = Vector2(24, -45)
-			key.left_foot = Vector2(-21, -10)
-			key.right_foot = Vector2(20, -7)
-		"airborne":
-			key.body_lean = 4.0
-			key.body_lift = -6.0
-			key.hammer_angle = -1.90
-			key.right_grip = Vector2(26, -32)
-			key.left_foot = Vector2(-21, -10)
-			key.right_foot = Vector2(20, -7)
 		"hurt":
 			key.body_lean = -10.0
 			key.body_lift = 2.0
@@ -642,7 +631,9 @@ static func _blend_heavy_poses(from: HeavyPose, to: HeavyPose, weight: float) ->
 	var blend := HeavyPose.new()
 	blend.body_lean = lerpf(from.body_lean, to.body_lean, weight)
 	blend.body_lift = lerpf(from.body_lift, to.body_lift, weight)
-	blend.hammer_angle = lerp_angle(from.hammer_angle, to.hammer_angle, weight)
+	# These angles encode a directed arc: shoulder -> overhead -> forward impact.
+	# Shortest-angle interpolation reverses this >180-degree swing through the floor.
+	blend.hammer_angle = lerpf(from.hammer_angle, to.hammer_angle, weight)
 	blend.right_grip = from.right_grip.lerp(to.right_grip, weight)
 	blend.left_foot = from.left_foot.lerp(to.left_foot, weight)
 	blend.right_foot = from.right_foot.lerp(to.right_foot, weight)

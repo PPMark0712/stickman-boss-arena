@@ -1,9 +1,9 @@
 class_name ArenaHazard
 extends Node2D
 
-const WAVE_HEIGHTS := [18, 31, 46, 61, 73, 78, 74, 63, 48, 32, 18]
+const WAVE_PROFILE := [0.23, 0.40, 0.59, 0.78, 0.94, 1.0, 0.95, 0.81, 0.62, 0.41, 0.23]
 const WAVE_WIDTH := 86.0
-const WAVE_MAX_HEIGHT := 78.0
+const WAVE_MAX_HEIGHT := ArenaConfig.PLAYER_JUMP_HEIGHT * 0.7
 const ROCK_REFLECT_SPEED := 1100.0
 
 var arena: Node2D
@@ -105,8 +105,8 @@ func _draw() -> void:
 	match kind:
 		"wave":
 			# Uneven half-dome silhouette assembled from rectangular columns.
-			for i in WAVE_HEIGHTS.size():
-				var height: int = WAVE_HEIGHTS[i]
+			for i in WAVE_PROFILE.size():
+				var height: float = WAVE_PROFILE[i] * WAVE_MAX_HEIGHT
 				var x := -WAVE_WIDTH * 0.5 + i * 8.0
 				draw_rect(Rect2(x, -height, 6, height), Color(tint, 0.68))
 				draw_rect(Rect2(x, -height, 6, 4), tint)

@@ -37,6 +37,7 @@ class ShockEffect extends RefCounted:
 	var position: Vector2
 	var color: Color
 	var radius: float
+	var height: float
 	var life := 0.34
 	var max_life := 0.34
 
@@ -44,6 +45,7 @@ class ShockEffect extends RefCounted:
 		position = origin
 		color = tint
 		radius = max_radius
+		height = minf(radius, ArenaHazard.WAVE_MAX_HEIGHT)
 
 class SlashEffect extends RefCounted:
 	var position: Vector2
@@ -482,11 +484,15 @@ func draw_effects() -> void:
 		var progress := 1.0 - shock.life / shock.max_life
 		var current_radius := lerpf(shock.radius * 0.22, shock.radius, progress)
 		var alpha := (1.0 - progress) * 0.92
+		# Keep the horizontal impact footprint while flattening the tall shock dome.
+		effects.draw_set_transform(
+			shock.position, 0, Vector2(1, shock.height / shock.radius),
+		)
 		for band in 3:
 			var radius := current_radius - band * 20.0
 			if radius > 0:
 				effects.draw_arc(
-					shock.position,
+					Vector2.ZERO,
 					radius,
 					PI,
 					TAU,
@@ -494,6 +500,7 @@ func draw_effects() -> void:
 					Color(shock.color, alpha * (1.0 - band * 0.24)),
 					7.0 - band * 1.5,
 				)
+		effects.draw_set_transform(Vector2.ZERO)
 		effects.draw_rect(
 			Rect2(
 				shock.position + Vector2(-current_radius, -3),

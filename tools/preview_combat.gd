@@ -86,6 +86,7 @@ func run() -> void:
 	await process_frame
 	await preview_spell()
 	await preview_cast_and_dive()
+	await preview_quarry_shoulder_sweep()
 	quit()
 
 func preview_spell() -> void:
@@ -146,4 +147,45 @@ func preview_cast_and_dive() -> void:
 		caption(sheet, "%d%% descent" % int(progress * 100), Vector2(80 + i * 245, 677), 17)
 	await capture("feel-cast-dive-sheet")
 	sheet.queue_free()
+	await process_frame
+
+func preview_quarry_shoulder_sweep() -> void:
+	var sheet := Node2D.new()
+	root.add_child(sheet)
+	caption(sheet, "QUARRY / carry - slight lift - continuous overhead arc - impact", Vector2(55, 30))
+	for row in 2:
+		for i in 6:
+			var visual: ProceduralFighterVisual = ArenaBoss.FIGHTER_VISUAL_SCENE.instantiate()
+			sheet.add_child(visual)
+			visual.fighter_kind = 1
+			visual.tint = ArenaConfig.AMBER
+			visual.position = Vector2(110 + i * 200, 335 + row * 300)
+			visual.scale = Vector2(1 if row == 0 else -1, 1) * 1.2
+			visual.weapon_in_front = row == 0
+			var pose: String = ["idle", "windup", "slam", "slam", "slam", "impact"][i]
+			visual.sample(pose, [0.0, 1.0, 0.35, 0.62, 0.84, 1.0][i], pose)
+			caption(sheet, ["carry", "hold", "swing 35%", "swing 62%", "swing 84%", "impact"][i],
+				Vector2(65 + i * 200, 355 + row * 300), 16)
+	await capture("feel-quarry-shoulder-sweep")
+	sheet.queue_free()
+	await process_frame
+	var room := ArenaRoom.new()
+	root.add_child(room)
+	room.set_process(false)
+	room.player.set_physics_process(false)
+	room.boss.set_physics_process(false)
+	room.player.position = Vector2(250, ArenaConfig.FLOOR_Y - ArenaConfig.PLAYER_JUMP_HEIGHT)
+	room.player.change_state(ArenaPlayer.State.AIR)
+	room.player.sync_visual()
+	room.player.visual.advance_pose_blend(1)
+	room.boss.visible = false
+	for x in [480, 1080]:
+		room.spawn_wave(Vector2(x, ArenaConfig.FLOOR_Y), 1, ArenaConfig.DANGER)
+		room.hazards.get_child(-1).set_physics_process(false)
+	room.show_shock(Vector2(780, ArenaConfig.FLOOR_Y - 3), ArenaConfig.DANGER, 185)
+	room.shocks[0].life = 0.12
+	room.effects.queue_redraw()
+	caption(room, "HEIGHT / full first jump 126 px / wave 88 px / flattened impact ring", Vector2(65, 60))
+	await capture("feel-quarry-wave-height")
+	room.queue_free()
 	await process_frame
