@@ -87,6 +87,8 @@ func run() -> void:
 	await preview_spell()
 	await preview_cast_and_dive()
 	await preview_quarry_shoulder_sweep()
+	await preview_diagonal_cuts()
+	await preview_combo_ascent()
 	quit()
 
 func preview_spell() -> void:
@@ -185,7 +187,71 @@ func preview_quarry_shoulder_sweep() -> void:
 	room.show_shock(Vector2(780, ArenaConfig.FLOOR_Y - 3), ArenaConfig.DANGER, 185)
 	room.shocks[0].life = 0.12
 	room.effects.queue_redraw()
-	caption(room, "HEIGHT / full first jump 126 px / wave 88 px / flattened impact ring", Vector2(65, 60))
+	caption(room, "HEIGHT / full first jump 126 px / wave 75.6 px (60%) / low impact ring", Vector2(65, 60))
 	await capture("feel-quarry-wave-height")
 	room.queue_free()
+	await process_frame
+
+func preview_diagonal_cuts() -> void:
+	var sheet := Node2D.new()
+	root.add_child(sheet)
+	for row in 2:
+		caption(sheet,
+			"PLAYER / " + ("near shoulder -> far hip" if row == 0 else "far shoulder -> near hip"),
+			Vector2(55, 35 + row * 340))
+		for i in 5:
+			var visual: ProceduralFighterVisual = ArenaPlayer.FIGHTER_VISUAL_SCENE.instantiate()
+			sheet.add_child(visual)
+			visual.position = Vector2(140 + i * 240, 245 + row * 340)
+			visual.scale = Vector2.ONE * 1.75
+			var progress: float = [0.15, 0.30, 0.45, 0.58, 0.70][i]
+			visual.sample("attack_a" if row == 0 else "attack_b", progress, "attack")
+			visual.advance_pose_blend(1)
+			caption(sheet, "%d%%" % int(progress * 100), Vector2(115 + i * 240, 270 + row * 340), 17)
+	await capture("feel-player-diagonal-cuts")
+	sheet.queue_free()
+	await process_frame
+	var room := ArenaRoom.new()
+	root.add_child(room)
+	room.set_process(false)
+	room.player.set_physics_process(false)
+	room.boss.set_physics_process(false)
+	room.boss.visible = false
+	room.player.position = Vector2(640, ArenaConfig.FLOOR_Y)
+	caption(room, "PLAYER / alternating diagonal cuts / original 142 x 56 hitbox", Vector2(65, 60))
+	for facing in [1, -1]:
+		for variant in 2:
+			room.player.state = ArenaPlayer.State.ATTACK
+			room.player.state_time = 0.14
+			room.player.attack_direction = Vector2.RIGHT * facing
+			room.player.attack_variant = variant
+			room.player.facing = facing
+			room.player.visual.scale = Vector2(facing, 1)
+			room.player.sync_visual()
+			room.player.visual.airborne = false
+			room.player.visual.advance_pose_blend(1)
+			await capture("feel-player-slash-%d-%d" % [facing, variant])
+	room.queue_free()
+	await process_frame
+
+func preview_combo_ascent() -> void:
+	var sheet := Node2D.new()
+	root.add_child(sheet)
+	caption(sheet, "COMBO / fast ascent spin -> brake into overhead hold -> dive -> impact", Vector2(55, 30))
+	for row in 2:
+		for i in 6:
+			var visual: ProceduralFighterVisual = ArenaBoss.FIGHTER_VISUAL_SCENE.instantiate()
+			sheet.add_child(visual)
+			visual.fighter_kind = 1
+			visual.tint = ArenaConfig.AMBER
+			visual.variant = 1
+			visual.position = Vector2(110 + i * 205, 325 + row * 300)
+			visual.scale = Vector2(1 if row == 0 else -1, 1) * 1.15
+			visual.weapon_in_front = row == 0
+			var pose: String = ["attack", "attack", "attack", "apex", "dive", "impact"][i]
+			visual.sample(pose, [0.0, 0.25, 0.80, 0.0, 0.70, 1.0][i], pose)
+			caption(sheet, ["launch", "spin 25%", "brake 80%", "overhead", "dive 70%", "impact"][i],
+				Vector2(65 + i * 205, 350 + row * 300), 16)
+	await capture("feel-quarry-combo-ascent")
+	sheet.queue_free()
 	await process_frame

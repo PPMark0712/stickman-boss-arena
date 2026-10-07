@@ -426,6 +426,7 @@ func hammer_head_center() -> Vector2:
 	var rig := BoxArt.heavy_rig_snapshot(
 		sampled_pose, sampled_progress, sampled_clock,
 		visual.squash if is_instance_valid(visual) else 0.0,
+		visual.variant if is_instance_valid(visual) else visual_variant(),
 	)
 	var local_center: Vector2 = rig.hammer_center
 	return position + visual.position + Vector2(local_center.x * facing, local_center.y) * HEAVY_VISUAL_SCALE
@@ -533,6 +534,8 @@ func visual_progress() -> float:
 	return 0.0
 
 func visual_variant() -> int:
+	if action == "combo" and pose in ["attack", "apex", "dive"]:
+		return 1
 	if action == "thrust":
 		return 2
 	if action == "boomerang" or action == "fan":
@@ -564,6 +567,7 @@ func _draw_fighter() -> void:
 	if kind == 0 and not dead and pose in ["windup", "recover", "apex"]:
 		var rig := BoxArt.heavy_rig_snapshot(
 			visual.pose, visual.animation_progress, visual.animation_clock, visual.squash,
+			visual.variant,
 		)
 		var head: Vector2 = rig.hammer_center
 		var charge := visual.animation_progress if pose != "apex" else 1.0

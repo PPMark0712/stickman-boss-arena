@@ -33,18 +33,19 @@ func run() -> void:
 		"Quarry flows from the second impact into the launch raise",
 	)
 	check(
-		ArenaBoss.COMBO_LAUNCH_SPEED <= -900.0
-		and ArenaBoss.COMBO_APEX_HOLD >= 0.3
-		and ArenaBoss.COMBO_DIVE_SPEED > absf(ArenaBoss.COMBO_LAUNCH_SPEED),
-		"Quarry holds the shoulder-height warning at the apex before a faster dive",
+		ArenaBoss.COMBO_LAUNCH_SPEED == -930.0
+		and ArenaBoss.COMBO_APEX_HOLD == 0.3
+		and ArenaBoss.COMBO_DIVE_SPEED == 1080.0,
+		"Quarry animation refinement preserves launch, apex hold, and dive timing",
 	)
 	var quarry_idle: Dictionary = BoxArt.heavy_rig_snapshot("idle", 0.0)
 	var quarry_windup: Dictionary = BoxArt.heavy_rig_snapshot("windup", 1.0)
 	var quarry_impact: Dictionary = BoxArt.heavy_rig_snapshot("slam", 1.0)
 	var quarry_recover_start: Dictionary = BoxArt.heavy_rig_snapshot("recover", 0.0)
 	var quarry_recover_end: Dictionary = BoxArt.heavy_rig_snapshot("recover", 1.0)
-	var quarry_spin_start: Dictionary = BoxArt.heavy_rig_snapshot("attack", 0.0)
-	var quarry_spin_end: Dictionary = BoxArt.heavy_rig_snapshot("attack", 1.0)
+	var quarry_spin_start := BoxArt.heavy_rig_snapshot("attack", 0.0, 0, 0, 1)
+	var quarry_spin_end := BoxArt.heavy_rig_snapshot("attack", 1.0, 0, 0, 1)
+	var combo_apex := BoxArt.heavy_rig_snapshot("apex", 0.0, 0, 0, 1)
 	var quarry_settle_middle: Dictionary = BoxArt.heavy_rig_snapshot("settle", 0.5)
 	var quarry_settle_end: Dictionary = BoxArt.heavy_rig_snapshot("settle", 1.0)
 	check(quarry_settle_middle.hammer_center.y < -90 and quarry_settle_end.hammer_center.is_equal_approx(quarry_idle.hammer_center), "Quarry recovery lifts the hammer above ground before returning to rest")
@@ -112,9 +113,38 @@ func run() -> void:
 		quarry_recover_start.hammer_center.is_equal_approx(quarry_impact.hammer_center)
 		and quarry_recover_end.hammer_center.is_equal_approx(quarry_windup.hammer_center)
 		and quarry_recover_end.hammer_center.is_equal_approx(quarry_spin_start.hammer_center)
-		and quarry_spin_start.hammer_center.is_equal_approx(quarry_spin_end.hammer_center),
+		and quarry_spin_end.hammer_center.is_equal_approx(combo_apex.hammer_center)
+		and BoxArt.heavy_rig_snapshot("dive", 0.0, 0, 0, 1).hammer_center.is_equal_approx(combo_apex.hammer_center)
+		and BoxArt.heavy_rig_snapshot("dive", 1.0, 0, 0, 1).hammer_center.is_equal_approx(quarry_impact.hammer_center),
 		"Quarry combo transitions preserve hammer continuity at impact, raise, and apex",
 	)
+	check(
+		combo_apex.hammer_center.y < combo_apex.head_center.y - 60
+		and absf(combo_apex.hammer_center.x - combo_apex.right_grip.x) < 3,
+		"Combo ascent finishes with the hammer overhead",
+	)
+	var early_spin := BoxArt.heavy_rig_snapshot("attack", 0.25, 0, 0, 1)
+	var late_spin := BoxArt.heavy_rig_snapshot("attack", 0.75, 0, 0, 1)
+	check(
+		early_spin.hammer_angle - quarry_spin_start.hammer_angle > PI
+		and early_spin.hammer_angle - quarry_spin_start.hammer_angle
+			> quarry_spin_end.hammer_angle - late_spin.hammer_angle
+		and quarry_spin_end.hammer_angle - quarry_spin_start.hammer_angle > TAU * 2,
+		"Combo spins faster early in the ascent and brakes into the overhead hold",
+	)
+	var combo_arms_connected := true
+	for air_pose in ["attack", "apex", "dive"]:
+		for i in 101:
+			var snapshot := BoxArt.heavy_rig_snapshot(air_pose, i / 100.0, 0, 0, 1)
+			for arm in ["left", "right"]:
+				var shoulder: Vector2 = snapshot["%s_shoulder" % arm]
+				var elbow: Vector2 = snapshot["%s_elbow" % arm]
+				var grip: Vector2 = snapshot["%s_grip" % arm]
+				combo_arms_connected = combo_arms_connected and (
+					is_equal_approx(shoulder.distance_to(elbow), 27.0)
+					and is_equal_approx(elbow.distance_to(grip), 27.0)
+				)
+	check(combo_arms_connected, "Fast spin and overhead dive preserve both arm lengths")
 	for arm in ["left", "right"]:
 		var shoulder: Vector2 = quarry_idle["%s_shoulder" % arm]
 		var elbow: Vector2 = quarry_idle["%s_elbow" % arm]
@@ -154,13 +184,35 @@ func run() -> void:
 	var second_slash_start: Dictionary = BoxArt.player_attack_rig_snapshot(0.15, 1)
 	var second_slash_finish: Dictionary = BoxArt.player_attack_rig_snapshot(0.70, 1)
 	check(
-		first_slash_start.hand.x < first_slash_finish.hand.x
+		first_slash_start.hand.x > first_slash_finish.hand.x
 		and first_slash_start.hand.y < first_slash_finish.hand.y
-		and second_slash_start.hand.x > second_slash_finish.hand.x
+		and second_slash_start.hand.x < second_slash_finish.hand.x
 		and second_slash_start.hand.y < second_slash_finish.hand.y,
-		"Player alternates two broad top-to-bottom diagonal sword paths",
+		"Player alternates near-shoulder to far-hip and far-shoulder to near-hip cuts",
+	)
+	check(
+		first_slash_start.sword_vector.length() > first_slash_finish.sword_vector.length()
+		and second_slash_start.sword_vector.length() < second_slash_finish.sword_vector.length(),
+		"Blade foreshortening follows the hand across the player's body",
 	)
 	for variant in 2:
+		var shallow_slash := true
+		var forward_blade := true
+		for i in 101:
+			var progress := i / 100.0
+			var point := BoxArt.player_slash_point(progress, variant, ArenaConfig.ATTACK_REACH)
+			var blade: Vector2 = BoxArt.player_attack_rig_snapshot(
+				lerpf(0.15, 0.70, progress), variant,
+			).sword_vector
+			shallow_slash = shallow_slash and (
+				point.x >= 0 and point.x <= ArenaConfig.ATTACK_REACH
+				and absf(point.y) + 6.0 <= ArenaConfig.ATTACK_HEIGHT * 0.5
+			)
+			forward_blade = forward_blade and (
+				blade.x > 0 and absf(blade.y) <= 12.01 and blade.length() <= 66.01
+			)
+		check(shallow_slash, "Slash %d stays within the existing shallow attack rectangle" % variant)
+		check(forward_blade, "Slash %d keeps the projected blade forward and nearly horizontal" % variant)
 		for sample in [0.0, 0.15, 0.35, 0.55, 0.70, 1.0]:
 			var attack_rig: Dictionary = BoxArt.player_attack_rig_snapshot(sample, variant)
 			var upper_arm: Vector2 = attack_rig.elbow - attack_rig.shoulder
@@ -299,10 +351,10 @@ func run() -> void:
 			room.hazards.get_child_count() - 1
 		) as ArenaHazard
 		check(
-			is_equal_approx(cleared_hazard.size.y, ArenaConfig.PLAYER_JUMP_HEIGHT * 0.7)
+			is_equal_approx(cleared_hazard.size.y, ArenaConfig.PLAYER_JUMP_HEIGHT * 0.6)
 			and cleared_hazard.size.x == ArenaHazard.WAVE_WIDTH
 			and is_equal_approx(cleared_hazard.hitbox().size.y, ArenaHazard.WAVE_MAX_HEIGHT),
-			"Ground wave and hitbox use 70 percent of a full first jump",
+			"Ground wave and hitbox use 60 percent of a full first jump",
 		)
 		var shock := ArenaRoom.ShockEffect.new(Vector2.ZERO, room.boss.color(), 185.0)
 		check(
@@ -428,6 +480,8 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 	var combo_ascent_spin_ticks := 0
 	var combo_descent_spin_ticks := 0
 	var combo_apex_ticks := 0
+	var combo_overhead_hold := true
+	var combo_hammer_matches_visual := true
 	var combo_dive_ticks := 0
 	var combo_shock_seen := false
 	var combo_target_recorded := false
@@ -508,6 +562,21 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 					combo_descent_spin_ticks += 1
 			elif room.boss.event_index == 6:
 				combo_apex_ticks += 1
+				var visual := room.boss.visual
+				var rig := BoxArt.heavy_rig_snapshot(
+					visual.pose, visual.animation_progress,
+					visual.animation_clock, visual.squash, visual.variant,
+				)
+				combo_overhead_hold = combo_overhead_hold and (
+					visual.variant == 1 and rig.hammer_center.y < rig.head_center.y - 60
+				)
+				var expected_head: Vector2 = (
+					room.boss.position + visual.position
+					+ rig.hammer_center * Vector2(room.boss.facing, 1) * ArenaBoss.HEAVY_VISUAL_SCALE
+				)
+				combo_hammer_matches_visual = combo_hammer_matches_visual and (
+					room.boss.hammer_head_center().is_equal_approx(expected_head)
+				)
 				combo_target_stayed_locked = (
 					combo_target_stayed_locked
 					and is_equal_approx(room.boss.target_x, combo_locked_target)
@@ -560,6 +629,7 @@ func verify_attack(room: ArenaRoom, attack: String) -> void:
 			"Quarry spins only while ascending",
 		)
 		check(combo_apex_ticks >= 20, "Quarry holds the raised hammer at the apex")
+		check(combo_overhead_hold and combo_hammer_matches_visual, "Live combo samples the overhead pose for both rendering and hammer collision")
 		check(
 			combo_target_recorded
 			and combo_target_stayed_locked

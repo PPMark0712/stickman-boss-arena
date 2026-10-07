@@ -3,7 +3,7 @@ extends Node2D
 
 const WAVE_PROFILE := [0.23, 0.40, 0.59, 0.78, 0.94, 1.0, 0.95, 0.81, 0.62, 0.41, 0.23]
 const WAVE_WIDTH := 86.0
-const WAVE_MAX_HEIGHT := ArenaConfig.PLAYER_JUMP_HEIGHT * 0.7
+const WAVE_MAX_HEIGHT := ArenaConfig.PLAYER_JUMP_HEIGHT * 0.6
 const ROCK_REFLECT_SPEED := 1100.0
 
 var arena: Node2D
