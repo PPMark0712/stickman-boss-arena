@@ -29,8 +29,8 @@ const HAMMER_SETTLE_TIME := 0.32
 
 var arena: Node2D
 var kind := 0
-var health := 240
-var max_health := 240
+var health := ArenaConfig.HAMMER_HEALTH
+var max_health := ArenaConfig.HAMMER_HEALTH
 var phase := 1
 var phase_time := 0.0
 var phase_pending := false

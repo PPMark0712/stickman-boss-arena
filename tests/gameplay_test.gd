@@ -19,6 +19,15 @@ func frames(count: int) -> void:
 
 func run() -> void:
 	check(
+		ArenaConfig.SWORD_DAMAGE == 10
+		and ArenaConfig.SPELL_DAMAGE == ArenaConfig.SWORD_DAMAGE * 3,
+		"Spell damage equals three sword hits",
+	)
+	check(
+		ArenaConfig.HAMMER_HEALTH == 400 and ArenaConfig.MIRROR_HEALTH == 300,
+		"Boss health matches the intended encounter lengths",
+	)
+	check(
 		ArenaBoss.COMBO_FIRST_SLAM >= 0.70
 		and ArenaBoss.COMBO_SECOND_WINDUP - ArenaBoss.COMBO_FIRST_SLAM >= 0.18
 		and ArenaBoss.COMBO_SECOND_SLAM - ArenaBoss.COMBO_SECOND_WINDUP >= 0.50,
